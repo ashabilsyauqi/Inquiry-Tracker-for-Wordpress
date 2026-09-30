@@ -739,7 +739,29 @@ function inq_tracker_export_csv( $type = 'all' ) {
     $out = fopen( 'php://output', 'w' );
     fprintf( $out, chr(0xEF).chr(0xBB).chr(0xBF) ); // UTF-8 BOM
 
-    if ( $type === 'origin' ) {
+    if ( $type === 'leads' ) {
+        fputcsv( $out, [ 'No', 'Waktu Masuk', 'Sumber Trafik (Origin)', 'URL Referrer Asal', 'Landing Page Pertama', 'Halaman Konversi (Klik WA)', 'Tipe Button', 'Teks Button', 'Target Link WA' ] );
+        $rows = $wpdb->get_results(
+            "SELECT * FROM {$log_table}
+             WHERE is_wa = 1 {$date_where} {$source_where}
+             ORDER BY clicked_at DESC LIMIT 5000",
+            ARRAY_A
+        );
+        $counter = 1;
+        foreach ( $rows as $r ) {
+            fputcsv( $out, [
+                $counter++,
+                $r['clicked_at'],
+                inq_tracker_origin_name( $r['origin_source'] ),
+                $r['origin_referrer'] ?: '(Direct / Ketik URL)',
+                $r['origin_landing'] ?: '-',
+                $r['page_url'],
+                $r['btn_type'] === 'floating' ? 'Floating WA' : 'Page Button',
+                $r['btn_text'],
+                $r['btn_href'],
+            ] );
+        }
+    } elseif ( $type === 'origin' ) {
         fputcsv( $out, [ 'No', 'Sumber Trafik', 'URL Referrer Asal', 'Landing Page Pertama', 'Halaman Konversi (CTA)', 'Total Klik Button', 'Total Inquiry WA', 'Terakhir Diklik' ] );
         $rows = $wpdb->get_results(
             "SELECT origin_source, origin_referrer, origin_landing, page_url,
@@ -840,30 +862,6 @@ function inq_tracker_export_csv( $type = 'all' ) {
                 $r['last_clicked'],
             ] );
         }
-    } elseif ( $type === 'all_logs' ) {
-        fputcsv( $out, [ 'ID', 'Tipe Button', 'WhatsApp', 'Halaman URL', 'Judul Halaman', 'Button Text', 'Target Link', 'CSS Selector', 'Sumber Trafik', 'Referrer Asal', 'Landing Page Pertama', 'Waktu Diklik' ] );
-        $rows = $wpdb->get_results(
-            "SELECT * FROM {$log_table}
-             WHERE 1=1 {$date_where} {$source_where}
-             ORDER BY clicked_at DESC LIMIT 5000",
-            ARRAY_A
-        );
-        foreach ( $rows as $r ) {
-            fputcsv( $out, [
-                $r['id'],
-                $r['btn_type'],
-                $r['is_wa'] ? 'Ya' : 'Tidak',
-                $r['page_url'],
-                $r['page_title'],
-                $r['btn_text'],
-                $r['btn_href'],
-                $r['btn_selector'],
-                inq_tracker_origin_name( $r['origin_source'] ),
-                $r['origin_referrer'],
-                $r['origin_landing'],
-                $r['clicked_at'],
-            ] );
-        }
     }
     fclose( $out );
     exit;
@@ -960,7 +958,18 @@ function inq_tracker_dashboard_page() {
         $label_source = 'Semua Sumber Trafik';
     }
 
-    // ── 3. Query Origin Report Data ──
+    // ── 3. Query Leads Data (PER LEADS - Real-time Inquiry Log) ──
+    $leads_data = $wpdb->get_results(
+        "SELECT id, btn_type, is_wa, page_url, page_title, btn_text, btn_href, btn_selector,
+                origin_source, origin_referrer, origin_landing, clicked_at
+         FROM {$log_table}
+         WHERE is_wa = 1 {$date_where} {$source_where}
+         ORDER BY clicked_at DESC
+         LIMIT 100",
+        ARRAY_A
+    );
+
+    // ── 4. Query Origin Aggregated Summary Data ──
     $origin_report_data = $wpdb->get_results(
         "SELECT origin_source, origin_referrer, origin_landing, page_url,
                 COUNT(*) AS total_clicks,
@@ -975,7 +984,7 @@ function inq_tracker_dashboard_page() {
         ARRAY_A
     );
 
-    // ── 4. Query Section Data ──
+    // ── 5. Query Section Data ──
     $wa_report_data = $wpdb->get_results(
         "SELECT page_url, page_title,
                 COUNT(*) AS total_wa_clicks,
@@ -1027,7 +1036,7 @@ function inq_tracker_dashboard_page() {
         $btns_by_page[ $btn['page_url'] ][] = $btn;
     }
 
-    // ── 5. KPI Displays ──
+    // ── 6. KPI Displays ──
     $display_wa_clicks    = (int) array_sum( array_column( $wa_report_data, 'total_wa_clicks' ) );
     $display_page_clicks  = (int) array_sum( array_column( $pages_raw, 'total_clicks' ) );
     $display_float_clicks = (int) array_sum( array_column( $float_raw, 'click_count' ) );
@@ -1036,7 +1045,8 @@ function inq_tracker_dashboard_page() {
     $display_pages_count = count( $active_pages );
 
     // Export URLs
-    $custom_params    = ( $period === 'custom' ? '&start_date=' . urlencode( $custom_start ) . '&end_date=' . urlencode( $custom_end ) : '' );
+    $custom_params     = ( $period === 'custom' ? '&start_date=' . urlencode( $custom_start ) . '&end_date=' . urlencode( $custom_end ) : '' );
+    $export_leads_url  = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=leads&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
     $export_origin_url = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=origin&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
     $export_wa_url     = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=wa_report&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
     $export_page_url   = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=pages&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
@@ -1069,7 +1079,7 @@ function inq_tracker_dashboard_page() {
                 <span class="dashicons dashicons-chart-bar" style="font-size:36px;width:36px;height:36px;color:#0073aa;"></span>
                 <div>
                     <h1 style="margin:0;font-size:24px;font-weight:700;color:#1e293b;">Inquiry Tracker — Tracking Klik & WhatsApp</h1>
-                    <div style="font-size:12px;color:#64748b;margin-top:2px;">Analisis efektivitas button & inquiry WhatsApp dengan Atribusi Sumber Trafik (Origin URL & Referrer)</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">Analisis efektivitas button & inquiry WhatsApp dengan Atribusi Objektif Sumber Trafik (Origin URL)</div>
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1168,7 +1178,7 @@ function inq_tracker_dashboard_page() {
                 <div style="font-size:13px;font-weight:600;opacity:0.9;display:flex;align-items:center;justify-content:space-between;">
                     <span style="display:flex;align-items:center;gap:6px;">
                         <span class="dashicons dashicons-whatsapp" style="font-size:18px;width:18px;height:18px;"></span>
-                        Total Inquiry WhatsApp
+                        Total Leads WhatsApp
                     </span>
                     <?php if ( $source !== 'all' ): ?>
                         <span style="background:rgba(255,255,255,0.25);font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
@@ -1250,34 +1260,149 @@ function inq_tracker_dashboard_page() {
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 1 (MAIN): DISTRIBUSI SUMBER TRAFIK & ORIGIN URL (FIRST-TOUCH ATTRIBUTION)
+             SECTION 1 (HIGHLIGHT): DAFTAR LEADS & INQUIRY WHATSAPP (PER LEAD)
+        ════════════════════════════════════════════════ -->
+        <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+                <div>
+                    <h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                        <span class="dashicons dashicons-whatsapp" style="color:#10b981;font-size:24px;width:24px;height:24px;"></span>
+                        Riwayat Leads & Inquiry WhatsApp (Real-Time Per Lead)
+                        <span style="background:#10b981;color:#fff;font-size:11px;padding:2px 10px;border-radius:12px;font-weight:600;">
+                            <?php echo count( $leads_data ); ?> Leads Tercatat
+                        </span>
+                    </h2>
+                    <div style="font-size:12px;color:#64748b;margin-top:4px;">
+                        Setiap baris mencatat 1 pengunjung (per lead) yang melakukan klik WhatsApp, lengkap dengan <strong>Origin URL (dari mana mereka dapat link)</strong>, landing page awal, dan halaman konversi.
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <a href="<?php echo esc_url( $export_leads_url ); ?>" class="button button-secondary" style="font-size:12px;">
+                        ⬇ Export Data Leads (CSV)
+                    </a>
+                </div>
+            </div>
+
+            <?php if ( empty( $leads_data ) ): ?>
+            <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
+                <span class="dashicons dashicons-info" style="font-size:32px;width:32px;height:32px;color:#94a3b8;display:block;margin:0 auto 8px;"></span>
+                Belum ada leads inquiry WhatsApp yang tercatat pada filter aktif (<strong><?php echo esc_html( $label_period ); ?></strong> · <?php echo esc_html( $label_source ); ?>).
+            </div>
+            <?php else: ?>
+            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;">
+                <table class="widefat striped" style="border:none;margin:0;">
+                    <thead>
+                        <tr style="background:#065f46;color:#fff;">
+                            <th style="color:#fff;width:35px;text-align:center;">#</th>
+                            <th style="color:#fff;width:145px;">Waktu Lead Masuk</th>
+                            <th style="color:#fff;width:170px;">Sumber Trafik (Origin)</th>
+                            <th style="color:#fff;width:200px;">URL Referrer Asal</th>
+                            <th style="color:#fff;">Landing Page Pertama</th>
+                            <th style="color:#fff;">Halaman Konversi (Klik WA)</th>
+                            <th style="color:#fff;width:150px;">Tombol yang Diklik</th>
+                            <th style="color:#fff;width:80px;text-align:center;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $leads_data as $idx => $lead ):
+                            $land_url  = $lead['origin_landing'] ?: $lead['page_url'];
+                            $land_path = parse_url( $land_url, PHP_URL_PATH ) ?: $land_url;
+                            $conv_path = parse_url( $lead['page_url'], PHP_URL_PATH ) ?: $lead['page_url'];
+                            $ts        = strtotime( $lead['clicked_at'] );
+                            $ts_date   = $ts ? date_i18n( 'd M Y, H:i', $ts ) : $lead['clicked_at'];
+                            $ts_rel    = $ts ? human_time_diff( $ts ) . ' lalu' : '';
+                        ?>
+                        <tr>
+                            <td style="text-align:center;font-weight:700;color:#64748b;"><?php echo $idx + 1; ?></td>
+                            <td>
+                                <div style="font-weight:600;font-size:12px;color:#0f172a;"><?php echo esc_html( $ts_date ); ?></div>
+                                <div style="font-size:10px;color:#94a3b8;"><?php echo esc_html( $ts_rel ); ?></div>
+                            </td>
+                            <td>
+                                <?php echo inq_tracker_origin_badge( $lead['origin_source'] ); ?>
+                            </td>
+                            <td>
+                                <?php if ( empty( $lead['origin_referrer'] ) ): ?>
+                                    <span style="font-size:11px;color:#64748b;">🌐 Direct (Ketik URL)</span>
+                                <?php else: ?>
+                                    <a href="<?php echo esc_url( $lead['origin_referrer'] ); ?>" target="_blank" style="font-size:11px;color:#0284c7;text-decoration:none;word-break:break-all;" title="<?php echo esc_attr( $lead['origin_referrer'] ); ?>">
+                                        <?php echo esc_html( substr( $lead['origin_referrer'], 0, 38 ) . ( strlen( $lead['origin_referrer'] ) > 38 ? '…' : '' ) ); ?> ↗
+                                    </a>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <div style="font-size:12px;font-weight:600;color:#0f172a;word-break:break-all;">
+                                    <?php echo esc_html( $land_path ); ?>
+                                    <?php if ( $land_path === '/' ): ?>
+                                        <span style="background:#dcfce7;color:#15803d;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700;">HOME</span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if ( $land_url !== $land_path ): ?>
+                                <a href="<?php echo esc_url( $land_url ); ?>" target="_blank" style="font-size:10px;color:#94a3b8;text-decoration:none;">Buka Landing ↗</a>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <div style="font-size:12px;font-weight:600;color:#0f172a;word-break:break-all;">
+                                    <?php echo esc_html( $conv_path ); ?>
+                                </div>
+                                <?php if ( $lead['page_title'] ): ?>
+                                <div style="font-size:10px;color:#64748b;"><?php echo esc_html( substr( $lead['page_title'], 0, 40 ) ); ?></div>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <div style="font-size:12px;font-weight:600;color:#0f172a;">
+                                    <?php echo esc_html( $lead['btn_text'] ?: 'WhatsApp Button' ); ?>
+                                </div>
+                                <div style="margin-top:2px;">
+                                    <?php if ( $lead['btn_type'] === 'floating' ): ?>
+                                        <span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;">FLOATING WA</span>
+                                    <?php else: ?>
+                                        <span style="background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;font-size:9px;padding:1px 6px;border-radius:4px;font-weight:600;">PAGE BUTTON</span>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
+                            <td style="text-align:center;">
+                                <a href="<?php echo esc_url( $lead['page_url'] ); ?>" target="_blank" class="button button-small" style="font-size:11px;">
+                                    Lihat ↗
+                                </a>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════
+             SECTION 2: RINGKASAN DISTRIBUSI SUMBER TRAFIK & JALUR (AGGREGATED SUMMARY)
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
                 <div>
                     <h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px;">
                         <span class="dashicons dashicons-admin-site-alt3" style="color:#0284c7;font-size:24px;width:24px;height:24px;"></span>
-                        Distribusi Sumber Trafik & Origin URL (First-Touch Attribution)
+                        Ringkasan Distribusi Sumber Trafik (Aggregated Summary)
                         <span style="background:#0284c7;color:#fff;font-size:11px;padding:2px 10px;border-radius:12px;font-weight:600;">
                             <?php echo count( $origin_report_data ); ?> Jalur Trafik
                         </span>
                     </h2>
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                        Melacak dari mana pengunjung pertama kali datang (Google Search, Google Ads, Meta Ads, Instagram, Direct, dll), landing page pertama, hingga halaman konversi tempat pengunjung klik CTA / WhatsApp.
+                        Agregat total klik button dan konversi WhatsApp yang dikelompokkan berdasarkan asal kedatangan, URL referrer, dan halaman tujuan.
                     </div>
                 </div>
 
                 <div style="display:flex;align-items:center;gap:8px;">
                     <a href="<?php echo esc_url( $export_origin_url ); ?>" class="button button-secondary" style="font-size:12px;">
-                        ⬇ Export Data Sumber Trafik (CSV)
+                        ⬇ Export Ringkasan Sumber Trafik (CSV)
                     </a>
                 </div>
             </div>
 
             <?php if ( empty( $origin_report_data ) ): ?>
             <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
-                <span class="dashicons dashicons-info" style="font-size:32px;width:32px;height:32px;color:#94a3b8;display:block;margin:0 auto 8px;"></span>
-                Belum ada data sumber trafik yang tercatat pada filter aktif (<strong><?php echo esc_html( $label_period ); ?></strong> · <?php echo esc_html( $label_source ); ?>).
+                Belum ada data ringkasan sumber trafik yang tercatat.
             </div>
             <?php else: ?>
             <div style="border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;">
@@ -1297,7 +1422,6 @@ function inq_tracker_dashboard_page() {
                     </thead>
                     <tbody>
                         <?php foreach ( $origin_report_data as $idx => $orow ):
-                            $ref_display = $orow['origin_referrer'] ?: '🌐 Direct (Ketik URL / Bookmark)';
                             $land_url    = $orow['origin_landing'] ?: $orow['page_url'];
                             $land_path   = parse_url( $land_url, PHP_URL_PATH ) ?: $land_url;
                             $conv_path   = parse_url( $orow['page_url'], PHP_URL_PATH ) ?: $orow['page_url'];
@@ -1325,9 +1449,6 @@ function inq_tracker_dashboard_page() {
                                         <span style="background:#dcfce7;color:#15803d;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700;">HOME</span>
                                     <?php endif; ?>
                                 </div>
-                                <?php if ( $land_url !== $land_path ): ?>
-                                <a href="<?php echo esc_url( $land_url ); ?>" target="_blank" style="font-size:10px;color:#94a3b8;text-decoration:none;">Buka Landing ↗</a>
-                                <?php endif; ?>
                             </td>
                             <td>
                                 <div style="font-size:12px;font-weight:600;color:#0f172a;word-break:break-all;">
@@ -1376,15 +1497,15 @@ function inq_tracker_dashboard_page() {
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 2: REPORT KLIK BUTTON WA TIAP HALAMAN
+             SECTION 3: REPORT KLIK BUTTON WA TIAP HALAMAN
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
                 <div>
                     <h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px;">
-                        <span class="dashicons dashicons-whatsapp" style="color:#10b981;font-size:24px;width:24px;height:24px;"></span>
-                        Report Klik Button WhatsApp Tiap Halaman
-                        <span style="background:#10b981;color:#fff;font-size:11px;padding:2px 10px;border-radius:12px;font-weight:600;">
+                        <span class="dashicons dashicons-media-spreadsheet" style="color:#0073aa;font-size:24px;width:24px;height:24px;"></span>
+                        Performa WhatsApp Tiap Halaman Konversi
+                        <span style="background:#0073aa;color:#fff;font-size:11px;padding:2px 10px;border-radius:12px;font-weight:600;">
                             <?php echo number_format( $display_wa_clicks ); ?> Total Inquiry
                         </span>
                     </h2>
@@ -1402,16 +1523,15 @@ function inq_tracker_dashboard_page() {
 
             <?php if ( empty( $wa_report_data ) ): ?>
             <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
-                <span class="dashicons dashicons-info" style="font-size:32px;width:32px;height:32px;color:#94a3b8;display:block;margin:0 auto 8px;"></span>
                 Belum ada klik button WhatsApp yang tercatat pada filter aktif.
             </div>
             <?php else: ?>
             <div style="border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;">
                 <table class="widefat striped" style="border:none;margin:0;">
                     <thead>
-                        <tr style="background:#065f46;color:#fff;">
+                        <tr style="background:#0073aa;color:#fff;">
                             <th style="color:#fff;width:40px;text-align:center;">#</th>
-                            <th style="color:#fff;">Halaman Asal Inquiry</th>
+                            <th style="color:#fff;">Halaman Konversi</th>
                             <th style="color:#fff;text-align:center;width:140px;">Button WA Page</th>
                             <th style="color:#fff;text-align:center;width:140px;">Floating WA</th>
                             <th style="color:#fff;text-align:center;width:140px;">Total Klik WA</th>
@@ -1443,7 +1563,7 @@ function inq_tracker_dashboard_page() {
 
                                 <!-- Visual Proportion Bar -->
                                 <div style="background:#e2e8f0;border-radius:4px;height:4px;width:100%;max-width:240px;margin-top:6px;">
-                                    <div style="background:#10b981;height:4px;border-radius:4px;width:<?php echo $pct; ?>%;"></div>
+                                    <div style="background:#0073aa;height:4px;border-radius:4px;width:<?php echo $pct; ?>%;"></div>
                                 </div>
                             </td>
 
@@ -1490,7 +1610,7 @@ function inq_tracker_dashboard_page() {
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 3: PAGES (DENGAN ACCORDION SUB-DROPDOWN TIAP BUTTON)
+             SECTION 4: PAGES (DENGAN ACCORDION SUB-DROPDOWN TIAP BUTTON)
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -1555,7 +1675,7 @@ function inq_tracker_dashboard_page() {
                         <div style="color:#94a3b8;font-size:12px;text-align:center;font-weight:600;"><?php echo $i + 1; ?></div>
 
                         <div>
-                            <div style="font-weight:700;font-size:14px;color:#0f172a;display:flex;align-items:center;flex-wrap:wrap;gap:5px;">
+                            <div style="font-weight:700;font-size:14px;color:#0f172a;display:flex;align-items:center;flex-wrap:gap:5px;">
                                 <?php echo esc_html( $path ); ?>
                                 <?php if ( $path === '/' ): ?>
                                     <span style="background:#e0f2fe;color:#0369a1;font-size:10px;padding:2px 6px;border-radius:6px;font-weight:700;">HOMEPAGE</span>
@@ -1650,7 +1770,7 @@ function inq_tracker_dashboard_page() {
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 4: FLOATING BUTTONS
+             SECTION 5: FLOATING BUTTONS
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
