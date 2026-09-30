@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Inquiry & Button Click Tracker
  * Plugin URI:  https://wordpress.org/plugins
- * Description: Universal real-time Button, WhatsApp, and Floating Click Tracking with First-Touch Origin URL & Traffic Source Attribution (Google Search, Google Ads, Meta Ads, Instagram, Direct, Referral).
- * Version:     1.3.0
+ * Description: Universal real-time Button, WhatsApp, and Floating Click Tracking. Features time period filters, Ads vs Organic labeling, accordion dropdown breakdowns per page, WhatsApp inquiry reports, and CSV export.
+ * Version:     1.2.0
  * Author:      Digital Web Growth
  * License:     GPL-2.0-or-later
  * Text Domain: inquiry-tracker
@@ -11,64 +11,69 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'INQ_TRACKER_VERSION', '1.3.0' );
+define( 'INQ_TRACKER_VERSION', '1.2.0' );
 define( 'INQ_TRACKER_TABLE', $GLOBALS['wpdb']->prefix . 'inquiry_tracker_clicks' );
 define( 'INQ_TRACKER_LOG_TABLE', $GLOBALS['wpdb']->prefix . 'inquiry_tracker_log' );
 
 /* ─────────────────────────────────────────
-   HELPER FUNCTIONS: ORIGIN & FILTERS
+   HELPER FUNCTIONS: AD PAGES & FILTERS
 ───────────────────────────────────────── */
-function inq_tracker_origin_name( $source ) {
-    $names = [
-        'google_search' => 'Google Search (Organik)',
-        'google_ads'    => 'Google Ads',
-        'meta_ads'      => 'Meta / Facebook Ads',
-        'facebook'      => 'Facebook',
-        'instagram'     => 'Instagram',
-        'tiktok_ads'    => 'TikTok Ads',
-        'tiktok'        => 'TikTok',
-        'campaign'      => 'Custom Campaign (UTM)',
-        'twitter'       => 'X / Twitter',
-        'youtube'       => 'YouTube',
-        'referral'      => 'Website Rujukan (Referral)',
-        'direct'        => 'Direct / Langsung',
-    ];
-    return $names[ $source ] ?? ( $source ? ucfirst( str_replace( '_', ' ', $source ) ) : 'Direct / Langsung' );
+function inq_tracker_get_ad_list() {
+    $raw = get_option( 'inq_tracker_ad_pages', '' );
+    $lines = explode( "\n", str_replace( "\r", "", $raw ) );
+    $ad_list = [];
+    foreach ( $lines as $line ) {
+        $line = trim( $line );
+        if ( empty( $line ) ) continue;
+        
+        $parsed = parse_url( $line );
+        $path = $parsed['path'] ?? $line;
+        $path = '/' . trim( $path, '/' );
+        if ( $path === '' ) $path = '/';
+        
+        $ad_list[] = [
+            'original' => $line,
+            'path'     => strtolower( $path ),
+        ];
+    }
+    return $ad_list;
 }
 
-function inq_tracker_origin_badge( $source ) {
-    switch ( $source ) {
-        case 'google_search':
-            return '<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🔍 Google Search (Organik)</span>';
-        case 'google_ads':
-            return '<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🎯 Google Ads</span>';
-        case 'meta_ads':
-            return '<span style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">📢 Meta / FB Ads</span>';
-        case 'facebook':
-            return '<span style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">📘 Facebook</span>';
-        case 'instagram':
-            return '<span style="background:#fdf2f8;color:#be185d;border:1px solid #fbcfe8;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">📱 Instagram</span>';
-        case 'tiktok_ads':
-            return '<span style="background:#f8fafc;color:#0f172a;border:1px solid #cbd5e1;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🎯 TikTok Ads</span>';
-        case 'tiktok':
-            return '<span style="background:#f8fafc;color:#0f172a;border:1px solid #cbd5e1;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🎵 TikTok</span>';
-        case 'campaign':
-            return '<span style="background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🏷️ Custom Campaign</span>';
-        case 'twitter':
-            return '<span style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🐦 X / Twitter</span>';
-        case 'youtube':
-            return '<span style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">▶️ YouTube</span>';
-        case 'referral':
-            return '<span style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">🔗 Referral Eksternal</span>';
-        case 'direct':
-        default:
-            return '<span style="background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;">🌐 Direct / Langsung</span>';
+function inq_tracker_is_ad_page( $url, $ad_list = null ) {
+    if ( $ad_list === null ) {
+        $ad_list = inq_tracker_get_ad_list();
     }
+    if ( empty( $ad_list ) ) return false;
+    
+    $parsed = parse_url( $url );
+    $url_path = $parsed['path'] ?? $url;
+    $url_path = '/' . trim( $url_path, '/' );
+    if ( $url_path === '' ) $url_path = '/';
+    $url_path = strtolower( $url_path );
+
+    foreach ( $ad_list as $ad ) {
+        $ad_path = $ad['path'];
+        // 1. Exact path match
+        if ( $url_path === $ad_path ) {
+            return true;
+        }
+        // 2. Subpath match (e.g. if site is in subfolder or matching path ending)
+        if ( $ad_path !== '/' && ( substr( $url_path, -strlen( $ad_path ) ) === $ad_path ) ) {
+            return true;
+        }
+        // 3. Normalized full URL match without query parameters
+        $orig_clean = strtok( $ad['original'], '?#' );
+        $url_clean  = strtok( $url, '?#' );
+        if ( strtolower( trim( (string)$orig_clean, '/' ) ) === strtolower( trim( (string)$url_clean, '/' ) ) ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 if ( ! function_exists( 'inq_filter_url' ) ) {
-    function inq_filter_url( $p, $s = 'all', $cs = '', $ce = '' ) {
-        $url = admin_url( 'admin.php?page=inquiry-analytics&period=' . urlencode( $p ) . '&source=' . urlencode( $s ) );
+    function inq_filter_url( $p, $t = 'all', $cs = '', $ce = '' ) {
+        $url = admin_url( 'admin.php?page=inquiry-analytics&period=' . urlencode( $p ) . '&traffic=' . urlencode( $t ) );
         if ( $p === 'custom' && $cs && $ce ) {
             $url .= '&start_date=' . urlencode( $cs ) . '&end_date=' . urlencode( $ce );
         }
@@ -107,37 +112,23 @@ function inq_tracker_ensure_tables() {
         $wpdb->query( "ALTER TABLE `{$agg_table}` ADD COLUMN `btn_type` VARCHAR(20) NOT NULL DEFAULT 'page' AFTER `id`" );
     }
 
-    // 2. Individual Click Log Table (for accurate Date/Period filtering & Origin Attribution)
+    // 2. Individual Click Log Table (for accurate Date/Period filtering)
     $wpdb->query( "CREATE TABLE IF NOT EXISTS `{$log_table}` (
-        `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        `btn_type`        VARCHAR(20)     NOT NULL DEFAULT 'page',
-        `is_wa`           TINYINT(1)      NOT NULL DEFAULT 0,
-        `page_url`        VARCHAR(500)    NOT NULL DEFAULT '',
-        `page_title`      VARCHAR(300)    NOT NULL DEFAULT '',
-        `btn_text`        VARCHAR(300)    NOT NULL DEFAULT '',
-        `btn_href`        VARCHAR(500)    NOT NULL DEFAULT '',
-        `btn_selector`    VARCHAR(300)    NOT NULL DEFAULT '',
-        `origin_source`   VARCHAR(50)     NOT NULL DEFAULT 'direct',
-        `origin_referrer` VARCHAR(500)    NOT NULL DEFAULT '',
-        `origin_landing`  VARCHAR(500)    NOT NULL DEFAULT '',
-        `clicked_at`      DATETIME        NOT NULL,
+        `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        `btn_type`     VARCHAR(20)     NOT NULL DEFAULT 'page',
+        `is_wa`        TINYINT(1)      NOT NULL DEFAULT 0,
+        `page_url`     VARCHAR(500)    NOT NULL DEFAULT '',
+        `page_title`   VARCHAR(300)    NOT NULL DEFAULT '',
+        `btn_text`     VARCHAR(300)    NOT NULL DEFAULT '',
+        `btn_href`     VARCHAR(500)    NOT NULL DEFAULT '',
+        `btn_selector` VARCHAR(300)    NOT NULL DEFAULT '',
+        `clicked_at`   DATETIME        NOT NULL,
         PRIMARY KEY (`id`),
         KEY `idx_clicked_at` (`clicked_at`),
         KEY `idx_is_wa` (`is_wa`),
         KEY `idx_btn_type` (`btn_type`),
-        KEY `idx_origin_source` (`origin_source`),
         KEY `idx_page_url` (`page_url`(190))
     ) {$charset};" );
-
-    // Check & migrate origin columns in existing log table if missing
-    $col_orig = $wpdb->get_results( "SHOW COLUMNS FROM `{$log_table}` LIKE 'origin_source'" );
-    if ( empty( $col_orig ) ) {
-        $wpdb->query( "ALTER TABLE `{$log_table}` 
-            ADD COLUMN `origin_source` VARCHAR(50) NOT NULL DEFAULT 'direct' AFTER `btn_selector`,
-            ADD COLUMN `origin_referrer` VARCHAR(500) NOT NULL DEFAULT '' AFTER `origin_source`,
-            ADD COLUMN `origin_landing` VARCHAR(500) NOT NULL DEFAULT '' AFTER `origin_referrer`,
-            ADD KEY `idx_origin_source` (`origin_source`)" );
-    }
 
     // 3. Seed log table from aggregate table if log table is empty
     $log_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$log_table}`" );
@@ -157,18 +148,15 @@ function inq_tracker_ensure_tables() {
                 $clicks = (int) $ex['click_count'];
                 for ( $i = 0; $i < $clicks; $i++ ) {
                     $wpdb->insert( $log_table, [
-                        'btn_type'        => $ex['btn_type'] ?? 'page',
-                        'is_wa'           => $is_wa,
-                        'page_url'        => $ex['page_url'],
-                        'page_title'      => $ex['page_title'],
-                        'btn_text'        => $ex['btn_text'],
-                        'btn_href'        => $ex['btn_href'],
-                        'btn_selector'    => $ex['btn_selector'],
-                        'origin_source'   => 'direct',
-                        'origin_referrer' => '',
-                        'origin_landing'  => $ex['page_url'],
-                        'clicked_at'      => $ex['last_clicked'] ?: current_time('mysql'),
-                    ], [ '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ] );
+                        'btn_type'     => $ex['btn_type'] ?? 'page',
+                        'is_wa'        => $is_wa,
+                        'page_url'     => $ex['page_url'],
+                        'page_title'   => $ex['page_title'],
+                        'btn_text'     => $ex['btn_text'],
+                        'btn_href'     => $ex['btn_href'],
+                        'btn_selector' => $ex['btn_selector'],
+                        'clicked_at'   => $ex['last_clicked'] ?: current_time('mysql'),
+                    ], [ '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s' ] );
                 }
             }
         }
@@ -194,24 +182,14 @@ function inq_tracker_record_click() {
         if ( strpos( $ua, $b ) !== false ) wp_die( 'ok' );
     }
 
-    $now             = current_time( 'mysql' );
-    $btn_type        = in_array( $_POST['btn_type'] ?? '', [ 'floating', 'page' ] ) ? $_POST['btn_type'] : 'page';
-    $is_wa_post      = isset( $_POST['is_wa'] ) && $_POST['is_wa'] == '1' ? 1 : 0;
-    $page_url        = sanitize_text_field( wp_unslash( $_POST['page_url']        ?? '' ) );
-    $page_ttl        = sanitize_text_field( wp_unslash( $_POST['page_title']      ?? '' ) );
-    $btn_text        = sanitize_text_field( wp_unslash( $_POST['btn_text']        ?? '' ) );
-    $btn_href        = sanitize_text_field( wp_unslash( $_POST['btn_href']        ?? '' ) );
-    $btn_sel         = sanitize_text_field( wp_unslash( $_POST['btn_selector']    ?? '' ) );
-    $origin_source   = sanitize_text_field( wp_unslash( $_POST['origin_source']   ?? 'direct' ) );
-    $origin_referrer = sanitize_text_field( wp_unslash( $_POST['origin_referrer'] ?? '' ) );
-    $origin_landing  = sanitize_text_field( wp_unslash( $_POST['origin_landing']  ?? '' ) );
-
-    if ( empty( $origin_source ) ) {
-        $origin_source = 'direct';
-    }
-    $origin_source   = substr( $origin_source, 0, 50 );
-    $origin_referrer = substr( $origin_referrer, 0, 500 );
-    $origin_landing  = substr( $origin_landing, 0, 500 );
+    $now        = current_time( 'mysql' );
+    $btn_type   = in_array( $_POST['btn_type'] ?? '', [ 'floating', 'page' ] ) ? $_POST['btn_type'] : 'page';
+    $is_wa_post = isset( $_POST['is_wa'] ) && $_POST['is_wa'] == '1' ? 1 : 0;
+    $page_url   = sanitize_text_field( wp_unslash( $_POST['page_url']     ?? '' ) );
+    $page_ttl   = sanitize_text_field( wp_unslash( $_POST['page_title']   ?? '' ) );
+    $btn_text   = sanitize_text_field( wp_unslash( $_POST['btn_text']     ?? '' ) );
+    $btn_href   = sanitize_text_field( wp_unslash( $_POST['btn_href']     ?? '' ) );
+    $btn_sel    = sanitize_text_field( wp_unslash( $_POST['btn_selector'] ?? '' ) );
 
     if ( empty( $page_url ) ) wp_die( 'ok' );
     if ( empty( $btn_sel ) ) {
@@ -274,20 +252,17 @@ function inq_tracker_record_click() {
         );
     }
 
-    // 2. Insert into Click Log Table (with timestamp & origin attribution)
+    // 2. Insert into Click Log Table (with timestamp)
     $wpdb->insert( $log_table, [
-        'btn_type'        => $btn_type,
-        'is_wa'           => $is_wa,
-        'page_url'        => $page_url,
-        'page_title'      => $page_ttl,
-        'btn_text'        => $btn_text,
-        'btn_href'        => $btn_href,
-        'btn_selector'    => $btn_sel,
-        'origin_source'   => $origin_source,
-        'origin_referrer' => $origin_referrer,
-        'origin_landing'  => $origin_landing,
-        'clicked_at'      => $now,
-    ], [ '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ] );
+        'btn_type'     => $btn_type,
+        'is_wa'        => $is_wa,
+        'page_url'     => $page_url,
+        'page_title'   => $page_ttl,
+        'btn_text'     => $btn_text,
+        'btn_href'     => $btn_href,
+        'btn_selector' => $btn_sel,
+        'clicked_at'   => $now,
+    ], [ '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s' ] );
 
     wp_die( 'ok' );
 }
@@ -304,91 +279,6 @@ function inq_tracker_inject_js() {
 (function() {
   'use strict';
   var ajaxUrl = <?php echo wp_json_encode( $ajax_url ); ?>;
-
-  // ── 1. First-Touch Origin & Referrer Tracking ──
-  function initOriginTracking() {
-    try {
-      if (sessionStorage.getItem('inq_origin_source')) {
-        return; // Session already initialized with first-touch
-      }
-
-      var source = 'direct';
-      var ref = document.referrer ? document.referrer.trim() : '';
-      var landing = window.location.href;
-      var curHost = window.location.hostname.toLowerCase();
-      var searchStr = window.location.search || '';
-
-      // A. Check Paid Ads & Campaign URL parameters
-      var urlParams = new URLSearchParams(searchStr);
-      var gclid = urlParams.get('gclid') || urlParams.get('gbraid') || urlParams.get('wbraid');
-      var fbclid = urlParams.get('fbclid');
-      var ttclid = urlParams.get('ttclid');
-      var utmSource = (urlParams.get('utm_source') || '').toLowerCase();
-      var utmMedium = (urlParams.get('utm_medium') || '').toLowerCase();
-
-      if (gclid) {
-        source = 'google_ads';
-      } else if (fbclid) {
-        source = 'meta_ads';
-      } else if (ttclid) {
-        source = 'tiktok_ads';
-      } else if (utmSource || utmMedium) {
-        if (utmSource.indexOf('google') !== -1 && /cpc|ppc|paid|ads/.test(utmMedium)) {
-          source = 'google_ads';
-        } else if (/facebook|meta|fb|instagram|ig/.test(utmSource) && /cpc|ppc|paid|ads/.test(utmMedium)) {
-          source = 'meta_ads';
-        } else if (utmSource.indexOf('tiktok') !== -1 && /cpc|ppc|paid|ads/.test(utmMedium)) {
-          source = 'tiktok_ads';
-        } else if (utmSource.indexOf('google') !== -1) {
-          source = 'google_search';
-        } else if (/instagram|ig/.test(utmSource)) {
-          source = 'instagram';
-        } else if (/facebook|fb/.test(utmSource)) {
-          source = 'facebook';
-        } else {
-          source = 'campaign';
-        }
-      } else if (ref) {
-        // B. Check Referrer Hostname
-        try {
-          var refUrl = new URL(ref);
-          var refHost = refUrl.hostname.toLowerCase();
-
-          if (refHost === curHost || refHost.indexOf('.' + curHost) !== -1 || curHost.indexOf('.' + refHost) !== -1) {
-            source = 'direct';
-          } else if (/google\.[a-z.]+/.test(refHost)) {
-            source = 'google_search';
-          } else if (/instagram\.com|l\.instagram\.com/.test(refHost)) {
-            source = 'instagram';
-          } else if (/facebook\.com|l\.facebook\.com|lm\.facebook\.com|fb\.com/.test(refHost)) {
-            source = 'facebook';
-          } else if (/tiktok\.com/.test(refHost)) {
-            source = 'tiktok';
-          } else if (/twitter\.com|t\.co|x\.com/.test(refHost)) {
-            source = 'twitter';
-          } else if (/youtube\.com|youtu\.be/.test(refHost)) {
-            source = 'youtube';
-          } else if (/bing\.com/.test(refHost)) {
-            source = 'bing_search';
-          } else if (/yahoo\.[a-z.]+/.test(refHost)) {
-            source = 'yahoo_search';
-          } else {
-            source = 'referral';
-          }
-        } catch(e) {
-          source = 'referral';
-        }
-      } else {
-        source = 'direct';
-      }
-
-      sessionStorage.setItem('inq_origin_source', source);
-      sessionStorage.setItem('inq_origin_referrer', ref);
-      sessionStorage.setItem('inq_origin_landing', landing);
-    } catch(err) {}
-  }
-
-  initOriginTracking();
 
   var FLOAT_SELECTORS = [
     '.wa-float', '.wa-float a', '.floating-whatsapp', '.floating-wpp',
@@ -503,27 +393,15 @@ function inq_tracker_inject_js() {
     lastSentTime = now;
     lastSentKey  = key;
 
-    var origSource   = 'direct';
-    var origReferrer = '';
-    var origLanding  = window.location.href;
-    try {
-      origSource   = sessionStorage.getItem('inq_origin_source') || 'direct';
-      origReferrer = sessionStorage.getItem('inq_origin_referrer') || '';
-      origLanding  = sessionStorage.getItem('inq_origin_landing') || window.location.href;
-    } catch(e) {}
-
     var params = new URLSearchParams();
-    params.append('action',          'inq_track_click');
-    params.append('btn_type',        data.btn_type);
-    params.append('is_wa',           data.is_wa ? '1' : '0');
-    params.append('page_url',        data.page_url);
-    params.append('page_title',      data.page_title);
-    params.append('btn_text',        data.btn_text);
-    params.append('btn_href',        data.btn_href);
-    params.append('btn_selector',    data.btn_selector);
-    params.append('origin_source',   origSource);
-    params.append('origin_referrer', origReferrer);
-    params.append('origin_landing',  origLanding);
+    params.append('action',       'inq_track_click');
+    params.append('btn_type',     data.btn_type);
+    params.append('is_wa',        data.is_wa ? '1' : '0');
+    params.append('page_url',     data.page_url);
+    params.append('page_title',   data.page_title);
+    params.append('btn_text',     data.btn_text);
+    params.append('btn_href',     data.btn_href);
+    params.append('btn_selector', data.btn_selector);
 
     var payload = params.toString();
     var sent = false;
@@ -671,7 +549,15 @@ add_action( 'admin_init', 'inq_tracker_handle_actions' );
 function inq_tracker_handle_actions() {
     if ( ! current_user_can( 'manage_options' ) ) return;
 
-    // 1. Reset Data
+    // 1. Save Ad Pages Configuration
+    if ( isset( $_POST['inq_save_ad_pages'] ) && check_admin_referer( 'inq_save_ad_pages_nonce' ) ) {
+        $ad_pages_raw = sanitize_textarea_field( wp_unslash( $_POST['inq_ad_pages'] ?? '' ) );
+        update_option( 'inq_tracker_ad_pages', $ad_pages_raw );
+        wp_redirect( admin_url( 'admin.php?page=inquiry-analytics&ad_saved=1' ) );
+        exit;
+    }
+
+    // 2. Reset Data
     if ( isset( $_POST['inq_reset_data'] ) && check_admin_referer( 'inq_reset_nonce' ) ) {
         global $wpdb;
         $type = $_POST['inq_reset_type'] ?? 'all';
@@ -692,19 +578,23 @@ function inq_tracker_handle_actions() {
         exit;
     }
 
-    // 2. Export CSV
+    // 3. Export CSV
     if ( isset( $_GET['inq_export'] ) && check_admin_referer( 'inq_export_nonce' ) ) {
-        inq_tracker_export_csv( sanitize_text_field( $_GET['inq_export'] ) );
+        inq_tracker_export_csv( $_GET['inq_export'] );
     }
 }
 
 function inq_tracker_export_csv( $type = 'all' ) {
     global $wpdb;
     $log_table = INQ_TRACKER_LOG_TABLE;
+    $ad_list   = inq_tracker_get_ad_list();
 
     // Filters for export
-    $period = sanitize_text_field( $_GET['period'] ?? 'all' );
-    $source = sanitize_text_field( $_GET['source'] ?? 'all' );
+    $period     = sanitize_text_field( $_GET['period'] ?? 'all' );
+    $traffic    = sanitize_text_field( $_GET['traffic'] ?? 'all' );
+    if ( ! in_array( $traffic, [ 'all', 'ads', 'organic' ], true ) ) {
+        $traffic = 'all';
+    }
 
     $today_str  = current_time( 'Y-m-d' );
     $date_where = "";
@@ -729,44 +619,13 @@ function inq_tracker_export_csv( $type = 'all' ) {
         $date_where = $wpdb->prepare( " AND clicked_at >= %s AND clicked_at <= %s", $cs . ' 00:00:00', $ce . ' 23:59:59' );
     }
 
-    $source_where = "";
-    if ( $source !== 'all' && ! empty( $source ) ) {
-        $source_where = $wpdb->prepare( " AND origin_source = %s", $source );
-    }
-
     header( 'Content-Type: text/csv; charset=UTF-8' );
-    header( 'Content-Disposition: attachment; filename="inquiry-report-' . sanitize_file_name( $type . '-' . $source . '-' . $period . '-' . date('Y-m-d') ) . '.csv"' );
+    header( 'Content-Disposition: attachment; filename="inquiry-report-' . sanitize_file_name( $type . '-' . $traffic . '-' . $period . '-' . date('Y-m-d') ) . '.csv"' );
     $out = fopen( 'php://output', 'w' );
     fprintf( $out, chr(0xEF).chr(0xBB).chr(0xBF) ); // UTF-8 BOM
 
-    if ( $type === 'origin' ) {
-        fputcsv( $out, [ 'No', 'Sumber Trafik', 'URL Referrer Asal', 'Landing Page Pertama', 'Halaman Konversi (CTA)', 'Total Klik Button', 'Total Inquiry WA', 'Terakhir Diklik' ] );
-        $rows = $wpdb->get_results(
-            "SELECT origin_source, origin_referrer, origin_landing, page_url,
-                    COUNT(*) AS total_clicks,
-                    SUM(CASE WHEN is_wa = 1 THEN 1 ELSE 0 END) AS total_wa,
-                    MAX(clicked_at) AS last_clicked
-             FROM {$log_table}
-             WHERE 1=1 {$date_where} {$source_where}
-             GROUP BY origin_source, origin_referrer, origin_landing, page_url
-             ORDER BY total_wa DESC, total_clicks DESC",
-            ARRAY_A
-        );
-        $counter = 1;
-        foreach ( $rows as $r ) {
-            fputcsv( $out, [
-                $counter++,
-                inq_tracker_origin_name( $r['origin_source'] ),
-                $r['origin_referrer'] ?: '(Direct / Tidak Ada Referrer)',
-                $r['origin_landing'] ?: '-',
-                $r['page_url'],
-                $r['total_clicks'],
-                $r['total_wa'],
-                $r['last_clicked'],
-            ] );
-        }
-    } elseif ( $type === 'wa_report' ) {
-        fputcsv( $out, [ 'No', 'Halaman URL', 'Judul Halaman', 'Total Klik WA', 'Klik WA Halaman', 'Klik Floating WA', 'Terakhir Diklik' ] );
+    if ( $type === 'wa_report' ) {
+        fputcsv( $out, [ 'No', 'Tipe Trafik', 'Halaman URL', 'Judul Halaman', 'Total Klik WA', 'Klik WA Halaman', 'Klik Floating WA', 'Terakhir Diklik' ] );
         $rows = $wpdb->get_results(
             "SELECT page_url, page_title,
                     COUNT(*) AS total_wa_clicks,
@@ -774,15 +633,20 @@ function inq_tracker_export_csv( $type = 'all' ) {
                     SUM(CASE WHEN btn_type = 'floating' THEN 1 ELSE 0 END) AS float_wa_clicks,
                     MAX(clicked_at) AS last_clicked
              FROM {$log_table}
-             WHERE is_wa = 1 {$date_where} {$source_where}
+             WHERE is_wa = 1 {$date_where}
              GROUP BY page_url
              ORDER BY total_wa_clicks DESC",
             ARRAY_A
         );
         $counter = 1;
         foreach ( $rows as $r ) {
+            $is_ad = inq_tracker_is_ad_page( $r['page_url'], $ad_list );
+            if ( $traffic === 'ads' && ! $is_ad ) continue;
+            if ( $traffic === 'organic' && $is_ad ) continue;
+
             fputcsv( $out, [
                 $counter++,
+                $is_ad ? 'Iklan (Paid)' : 'Organik',
                 $r['page_url'],
                 $r['page_title'],
                 $r['total_wa_clicks'],
@@ -792,21 +656,24 @@ function inq_tracker_export_csv( $type = 'all' ) {
             ] );
         }
     } elseif ( $type === 'pages' ) {
-        fputcsv( $out, [ 'No', 'Halaman URL', 'Judul Halaman', 'Button Text', 'Target Link', 'CSS Selector', 'Total Klik', 'Terakhir Diklik' ] );
+        fputcsv( $out, [ 'Tipe Trafik', 'Halaman URL', 'Judul Halaman', 'Button Text', 'Target Link', 'CSS Selector', 'Total Klik', 'Terakhir Diklik' ] );
         $rows = $wpdb->get_results(
             "SELECT page_url, page_title, btn_text, btn_href, btn_selector,
                     COUNT(*) AS click_count,
                     MAX(clicked_at) AS last_clicked
              FROM {$log_table}
-             WHERE btn_type = 'page' {$date_where} {$source_where}
+             WHERE btn_type = 'page' {$date_where}
              GROUP BY page_url, btn_selector, btn_text, btn_href
              ORDER BY page_url, click_count DESC",
             ARRAY_A
         );
-        $counter = 1;
         foreach ( $rows as $r ) {
+            $is_ad = inq_tracker_is_ad_page( $r['page_url'], $ad_list );
+            if ( $traffic === 'ads' && ! $is_ad ) continue;
+            if ( $traffic === 'organic' && $is_ad ) continue;
+
             fputcsv( $out, [
-                $counter++,
+                $is_ad ? 'Iklan (Paid)' : 'Organik',
                 $r['page_url'],
                 $r['page_title'],
                 $r['btn_text'],
@@ -817,21 +684,24 @@ function inq_tracker_export_csv( $type = 'all' ) {
             ] );
         }
     } elseif ( $type === 'floating' ) {
-        fputcsv( $out, [ 'No', 'Button Text', 'Target Link', 'CSS Selector', 'Halaman Terakhir', 'Total Klik', 'Terakhir Diklik' ] );
+        fputcsv( $out, [ 'Tipe Halaman Asal', 'Button Text', 'Target Link', 'CSS Selector', 'Halaman Terakhir', 'Total Klik', 'Terakhir Diklik' ] );
         $rows = $wpdb->get_results(
             "SELECT btn_text, btn_href, btn_selector, page_url,
                     COUNT(*) AS click_count,
                     MAX(clicked_at) AS last_clicked
              FROM {$log_table}
-             WHERE btn_type = 'floating' {$date_where} {$source_where}
+             WHERE btn_type = 'floating' {$date_where}
              GROUP BY btn_selector, btn_text, btn_href, page_url
              ORDER BY click_count DESC",
             ARRAY_A
         );
-        $counter = 1;
         foreach ( $rows as $r ) {
+            $is_ad = inq_tracker_is_ad_page( $r['page_url'], $ad_list );
+            if ( $traffic === 'ads' && ! $is_ad ) continue;
+            if ( $traffic === 'organic' && $is_ad ) continue;
+
             fputcsv( $out, [
-                $counter++,
+                $is_ad ? 'Iklan (Paid)' : 'Organik',
                 $r['btn_text'],
                 $r['btn_href'],
                 $r['btn_selector'],
@@ -840,46 +710,25 @@ function inq_tracker_export_csv( $type = 'all' ) {
                 $r['last_clicked'],
             ] );
         }
-    } elseif ( $type === 'all_logs' ) {
-        fputcsv( $out, [ 'ID', 'Tipe Button', 'WhatsApp', 'Halaman URL', 'Judul Halaman', 'Button Text', 'Target Link', 'CSS Selector', 'Sumber Trafik', 'Referrer Asal', 'Landing Page Pertama', 'Waktu Diklik' ] );
-        $rows = $wpdb->get_results(
-            "SELECT * FROM {$log_table}
-             WHERE 1=1 {$date_where} {$source_where}
-             ORDER BY clicked_at DESC LIMIT 5000",
-            ARRAY_A
-        );
-        foreach ( $rows as $r ) {
-            fputcsv( $out, [
-                $r['id'],
-                $r['btn_type'],
-                $r['is_wa'] ? 'Ya' : 'Tidak',
-                $r['page_url'],
-                $r['page_title'],
-                $r['btn_text'],
-                $r['btn_href'],
-                $r['btn_selector'],
-                inq_tracker_origin_name( $r['origin_source'] ),
-                $r['origin_referrer'],
-                $r['origin_landing'],
-                $r['clicked_at'],
-            ] );
-        }
     }
     fclose( $out );
     exit;
 }
 
 /* ─────────────────────────────────────────
-   6. DASHBOARD PAGE (v1.3.0 with Origin Attribution)
+   6. DASHBOARD PAGE (v3.0)
 ───────────────────────────────────────── */
 function inq_tracker_dashboard_page() {
     global $wpdb;
     $log_table = INQ_TRACKER_LOG_TABLE;
     $agg_table = INQ_TRACKER_TABLE;
 
-    // ── Determine Active Filters (Period & Source) ──
-    $period = sanitize_text_field( $_GET['period'] ?? 'all' );
-    $source = sanitize_text_field( $_GET['source'] ?? 'all' );
+    // ── Determine Active Filters (Period & Traffic) ──
+    $period    = sanitize_text_field( $_GET['period'] ?? 'all' );
+    $traffic   = sanitize_text_field( $_GET['traffic'] ?? 'all' );
+    if ( ! in_array( $traffic, [ 'all', 'ads', 'organic' ], true ) ) {
+        $traffic = 'all';
+    }
 
     $today_str    = current_time( 'Y-m-d' );
     $start_date   = '';
@@ -925,65 +774,17 @@ function inq_tracker_dashboard_page() {
         $date_where = $wpdb->prepare( " AND clicked_at >= %s AND clicked_at <= %s", $start_date, $end_date );
     }
 
-    // ── 1. Query Overall Stats by Source for Filter Pills & Highlights ──
-    $source_stats_raw = $wpdb->get_results(
-        "SELECT origin_source,
-                COUNT(*) AS total_clicks,
-                SUM(CASE WHEN is_wa = 1 THEN 1 ELSE 0 END) AS total_wa
-         FROM {$log_table}
-         WHERE 1=1 {$date_where}
-         GROUP BY origin_source
-         ORDER BY total_wa DESC, total_clicks DESC",
-        ARRAY_A
-    );
+    $ad_list = inq_tracker_get_ad_list();
 
-    $source_wa_map     = [];
-    $source_clicks_map = [];
-    $total_wa_all      = 0;
-    $total_clicks_all  = 0;
-
-    foreach ( $source_stats_raw as $s_row ) {
-        $s_key = $s_row['origin_source'] ?: 'direct';
-        $source_wa_map[ $s_key ]     = (int) $s_row['total_wa'];
-        $source_clicks_map[ $s_key ] = (int) $s_row['total_clicks'];
-        $total_wa_all               += (int) $s_row['total_wa'];
-        $total_clicks_all           += (int) $s_row['total_clicks'];
-    }
-
-    // ── 2. Source Where Clause ──
-    $source_where = "";
-    if ( $source !== 'all' && ! empty( $source ) ) {
-        $source_where = $wpdb->prepare( " AND origin_source = %s", $source );
-        $label_source = inq_tracker_origin_name( $source );
-    } else {
-        $source       = 'all';
-        $label_source = 'Semua Sumber Trafik';
-    }
-
-    // ── 3. Query Origin Report Data ──
-    $origin_report_data = $wpdb->get_results(
-        "SELECT origin_source, origin_referrer, origin_landing, page_url,
-                COUNT(*) AS total_clicks,
-                SUM(CASE WHEN is_wa = 1 THEN 1 ELSE 0 END) AS total_wa,
-                SUM(CASE WHEN btn_type = 'page' THEN 1 ELSE 0 END) AS page_clicks,
-                SUM(CASE WHEN btn_type = 'floating' THEN 1 ELSE 0 END) AS float_clicks,
-                MAX(clicked_at) AS last_clicked
-         FROM {$log_table}
-         WHERE 1=1 {$date_where} {$source_where}
-         GROUP BY origin_source, origin_referrer, origin_landing, page_url
-         ORDER BY total_wa DESC, total_clicks DESC",
-        ARRAY_A
-    );
-
-    // ── 4. Query Section Data ──
-    $wa_report_data = $wpdb->get_results(
+    // ── 1. Query Raw Data for Period ──
+    $wa_report_raw = $wpdb->get_results(
         "SELECT page_url, page_title,
                 COUNT(*) AS total_wa_clicks,
                 SUM(CASE WHEN btn_type = 'page' THEN 1 ELSE 0 END) AS page_wa_clicks,
                 SUM(CASE WHEN btn_type = 'floating' THEN 1 ELSE 0 END) AS float_wa_clicks,
                 MAX(clicked_at) AS last_clicked
          FROM {$log_table}
-         WHERE is_wa = 1 {$date_where} {$source_where}
+         WHERE is_wa = 1 {$date_where}
          GROUP BY page_url
          ORDER BY total_wa_clicks DESC",
         ARRAY_A
@@ -994,7 +795,7 @@ function inq_tracker_dashboard_page() {
                 COUNT(*) AS total_clicks,
                 MAX(clicked_at) AS last_clicked
          FROM {$log_table}
-         WHERE btn_type = 'page' {$date_where} {$source_where}
+         WHERE btn_type = 'page' {$date_where}
          GROUP BY page_url
          ORDER BY total_clicks DESC",
         ARRAY_A
@@ -1005,7 +806,7 @@ function inq_tracker_dashboard_page() {
                 COUNT(*) AS click_count,
                 MAX(clicked_at) AS last_clicked
          FROM {$log_table}
-         WHERE btn_type = 'page' {$date_where} {$source_where}
+         WHERE btn_type = 'page' {$date_where}
          GROUP BY page_url, btn_selector, btn_text, btn_href
          ORDER BY click_count DESC",
         ARRAY_A
@@ -1016,50 +817,106 @@ function inq_tracker_dashboard_page() {
                 COUNT(*) AS click_count,
                 MAX(clicked_at) AS last_clicked
          FROM {$log_table}
-         WHERE btn_type = 'floating' {$date_where} {$source_where}
+         WHERE btn_type = 'floating' {$date_where}
          GROUP BY btn_selector, btn_text, btn_href, page_url
          ORDER BY click_count DESC",
         ARRAY_A
     );
 
+    // ── 2. Calculate Breakdown KPIs (Iklan vs Organik) ──
+    $wa_ads_clicks = 0; $wa_org_clicks = 0;
+    foreach ( $wa_report_raw as $r ) {
+        if ( inq_tracker_is_ad_page( $r['page_url'], $ad_list ) ) {
+            $wa_ads_clicks += (int) $r['total_wa_clicks'];
+        } else {
+            $wa_org_clicks += (int) $r['total_wa_clicks'];
+        }
+    }
+    $total_wa_clicks_all = $wa_ads_clicks + $wa_org_clicks;
+
+    $page_ads_clicks = 0; $page_org_clicks = 0;
+    foreach ( $pages_raw as $r ) {
+        if ( inq_tracker_is_ad_page( $r['page_url'], $ad_list ) ) {
+            $page_ads_clicks += (int) $r['total_clicks'];
+        } else {
+            $page_org_clicks += (int) $r['total_clicks'];
+        }
+    }
+    $total_page_clicks_all = $page_ads_clicks + $page_org_clicks;
+
+    $float_ads_clicks = 0; $float_org_clicks = 0;
+    foreach ( $float_raw as $r ) {
+        if ( inq_tracker_is_ad_page( $r['page_url'], $ad_list ) ) {
+            $float_ads_clicks += (int) $r['click_count'];
+        } else {
+            $float_org_clicks += (int) $r['click_count'];
+        }
+    }
+    $total_float_clicks_all = $float_ads_clicks + $float_org_clicks;
+
+    // ── 3. Filter Datasets According to Active Traffic Filter ──
+    $wa_report_data = [];
+    foreach ( $wa_report_raw as $r ) {
+        $is_ad = inq_tracker_is_ad_page( $r['page_url'], $ad_list );
+        if ( $traffic === 'ads' && ! $is_ad ) continue;
+        if ( $traffic === 'organic' && $is_ad ) continue;
+        $r['is_ad'] = $is_ad;
+        $wa_report_data[] = $r;
+    }
+
+    $pages_data = [];
+    foreach ( $pages_raw as $r ) {
+        $is_ad = inq_tracker_is_ad_page( $r['page_url'], $ad_list );
+        if ( $traffic === 'ads' && ! $is_ad ) continue;
+        if ( $traffic === 'organic' && $is_ad ) continue;
+        $r['is_ad'] = $is_ad;
+        $pages_data[] = $r;
+    }
+
     $btns_by_page = [];
     foreach ( $btns_raw as $btn ) {
+        $is_ad = inq_tracker_is_ad_page( $btn['page_url'], $ad_list );
+        if ( $traffic === 'ads' && ! $is_ad ) continue;
+        if ( $traffic === 'organic' && $is_ad ) continue;
+        $btn['is_ad'] = $is_ad;
         $btns_by_page[ $btn['page_url'] ][] = $btn;
     }
 
-    // ── 5. KPI Displays ──
-    $display_wa_clicks    = (int) array_sum( array_column( $wa_report_data, 'total_wa_clicks' ) );
-    $display_page_clicks  = (int) array_sum( array_column( $pages_raw, 'total_clicks' ) );
-    $display_float_clicks = (int) array_sum( array_column( $float_raw, 'click_count' ) );
+    $float_data = [];
+    foreach ( $float_raw as $r ) {
+        $is_ad = inq_tracker_is_ad_page( $r['page_url'], $ad_list );
+        if ( $traffic === 'ads' && ! $is_ad ) continue;
+        if ( $traffic === 'organic' && $is_ad ) continue;
+        $r['is_ad'] = $is_ad;
+        $float_data[] = $r;
+    }
 
-    $active_pages = array_unique( array_merge( array_column( $pages_raw, 'page_url' ), array_column( $float_raw, 'page_url' ) ) );
+    // Active numbers for display
+    if ( $traffic === 'ads' ) {
+        $display_wa_clicks    = $wa_ads_clicks;
+        $display_page_clicks  = $page_ads_clicks;
+        $display_float_clicks = $float_ads_clicks;
+        $label_traffic        = '🎯 Hanya Iklan (Paid Ads)';
+    } elseif ( $traffic === 'organic' ) {
+        $display_wa_clicks    = $wa_org_clicks;
+        $display_page_clicks  = $page_org_clicks;
+        $display_float_clicks = $float_org_clicks;
+        $label_traffic        = '🌱 Hanya Organik';
+    } else {
+        $display_wa_clicks    = $total_wa_clicks_all;
+        $display_page_clicks  = $total_page_clicks_all;
+        $display_float_clicks = $total_float_clicks_all;
+        $label_traffic        = 'Semua Trafik (Iklan + Organik)';
+    }
+
+    $active_pages = array_unique( array_merge( array_column( $pages_data, 'page_url' ), array_column( $float_data, 'page_url' ) ) );
     $display_pages_count = count( $active_pages );
 
-    // Export URLs
-    $custom_params    = ( $period === 'custom' ? '&start_date=' . urlencode( $custom_start ) . '&end_date=' . urlencode( $custom_end ) : '' );
-    $export_origin_url = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=origin&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
-    $export_wa_url     = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=wa_report&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
-    $export_page_url   = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=pages&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
-    $export_float_url  = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=floating&period=' . $period . '&source=' . $source . $custom_params ), 'inq_export_nonce' );
-
-    // Known standard source presets for filter pills
-    $known_sources = [
-        'all'           => 'Semua Sumber',
-        'google_search' => '🔍 Google Search (Organik)',
-        'google_ads'    => '🎯 Google Ads',
-        'meta_ads'      => '📢 Meta / FB Ads',
-        'instagram'     => '📱 Instagram',
-        'facebook'      => '📘 Facebook',
-        'direct'        => '🌐 Direct / Langsung',
-        'referral'      => '🔗 Referral Eksternal',
-        'campaign'      => '🏷️ Custom Campaign',
-    ];
-    foreach ( $source_stats_raw as $s_row ) {
-        $sk = $s_row['origin_source'];
-        if ( $sk && ! isset( $known_sources[ $sk ] ) ) {
-            $known_sources[ $sk ] = inq_tracker_origin_name( $sk );
-        }
-    }
+    // Export URLs with period & traffic parameters
+    $custom_params = ( $period === 'custom' ? '&start_date=' . urlencode( $custom_start ) . '&end_date=' . urlencode( $custom_end ) : '' );
+    $export_wa_url    = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=wa_report&period=' . $period . '&traffic=' . $traffic . $custom_params ), 'inq_export_nonce' );
+    $export_page_url  = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=pages&period=' . $period . '&traffic=' . $traffic . $custom_params ), 'inq_export_nonce' );
+    $export_float_url = wp_nonce_url( admin_url( 'admin.php?page=inquiry-analytics&inq_export=floating&period=' . $period . '&traffic=' . $traffic . $custom_params ), 'inq_export_nonce' );
     ?>
     <div class="wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,sans-serif;width:100%;max-width:100%;box-sizing:border-box;margin-top:20px;padding-right:24px;">
 
@@ -1069,7 +926,7 @@ function inq_tracker_dashboard_page() {
                 <span class="dashicons dashicons-chart-bar" style="font-size:36px;width:36px;height:36px;color:#0073aa;"></span>
                 <div>
                     <h1 style="margin:0;font-size:24px;font-weight:700;color:#1e293b;">Inquiry Tracker — Tracking Klik & WhatsApp</h1>
-                    <div style="font-size:12px;color:#64748b;margin-top:2px;">Analisis efektivitas button & inquiry WhatsApp dengan Atribusi Sumber Trafik (Origin URL & Referrer)</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">Analisis efektivitas button & inquiry WhatsApp (Halaman Iklan vs Organik)</div>
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1077,8 +934,8 @@ function inq_tracker_dashboard_page() {
                     <span class="dashicons dashicons-calendar-alt" style="font-size:16px;width:16px;height:16px;"></span>
                     Periode: <?php echo esc_html( $label_period ); ?>
                 </div>
-                <div style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;">
-                    <?php echo esc_html( $label_source ); ?>
+                <div style="background:<?php echo $traffic === 'ads' ? '#f3e8ff;color:#7c3aed;border:1px solid #d8b4fe;' : ( $traffic === 'organic' ? '#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;' : '#f1f5f9;color:#475569;border:1px solid #e2e8f0;' ); ?>;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;">
+                    <?php echo esc_html( $label_traffic ); ?>
                 </div>
             </div>
         </div>
@@ -1087,8 +944,51 @@ function inq_tracker_dashboard_page() {
         <div class="notice notice-success is-dismissible" style="margin-bottom:20px;"><p>✅ Data berhasil direset.</p></div>
         <?php endif; ?>
 
+        <?php if ( isset( $_GET['ad_saved'] ) ): ?>
+        <div class="notice notice-success is-dismissible" style="margin-bottom:20px;">
+            <p>✅ <strong>Daftar halaman iklan berhasil diperbarui!</strong> Sebanyak <?php echo count( $ad_list ); ?> link halaman iklan aktif terdaftar.</p>
+        </div>
+        <?php endif; ?>
+
         <!-- ═══════════════════════════════════════════════
-             FILTER BAR: PERIODE WAKTU & SUMBER TRAFIK (ORIGIN URL)
+             CARD: KONFIGURASI HALAMAN IKLAN (ADS LANDING PAGES)
+        ════════════════════════════════════════════════ -->
+        <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:18px 20px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="dashicons dashicons-megaphone" style="color:#7c3aed;font-size:22px;width:22px;height:22px;"></span>
+                    <strong style="font-size:15px;color:#0f172a;">Konfigurasi Halaman Iklan (Landing Pages Ads)</strong>
+                    <span style="background:#f3e8ff;color:#7c3aed;font-size:11px;font-weight:700;padding:2px 10px;border-radius:12px;border:1px solid #e9d5ff;">
+                        <?php echo count( $ad_list ); ?> Halaman Terdaftar
+                    </span>
+                </div>
+                <button type="button" onclick="inqToggleSettings()" class="button button-secondary" style="font-size:12px;" id="inq-btn-toggle-settings">
+                    ⚙ Buka / Tutup Pengaturan Iklan
+                </button>
+            </div>
+
+            <div id="inq-settings-body" style="<?php echo ( empty( $ad_list ) || isset( $_GET['ad_saved'] ) ) ? 'display:block;' : 'display:none;'; ?>">
+                <p style="font-size:12px;color:#64748b;margin-top:0;margin-bottom:10px;line-height:1.5;">
+                    Masukkan link atau path halaman landing page iklan (<strong>1 URL per baris</strong>). 
+                    Semua inquiry, klik tombol, dan <em>floating WhatsApp</em> yang terjadi di halaman ini akan otomatis diberi label <strong>🎯 IKLAN</strong>.
+                    <br><em>Tips: Sistem otomatis mencocokkan URL meskipun membawa parameter iklan (seperti <code>?utm_source=...</code>, <code>?gclid=...</code>, atau <code>?fbclid=...</code>).</em>
+                </p>
+                <form method="post" action="">
+                    <?php wp_nonce_field( 'inq_save_ad_pages_nonce' ); ?>
+                    <input type="hidden" name="inq_save_ad_pages" value="1">
+                    <textarea name="inq_ad_pages" rows="4" style="width:100%;font-family:monospace;font-size:12px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;" placeholder="Contoh:&#10;https://website-anda.com/promo-spesial/&#10;/landing-page-produk/&#10;/iklan-google/"><?php echo esc_textarea( get_option( 'inq_tracker_ad_pages', '' ) ); ?></textarea>
+                    <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <span style="font-size:11px;color:#94a3b8;">Format: <code>https://website.com/promo/</code> atau slug <code>/promo/</code></span>
+                        <button type="submit" class="button button-primary" style="background:#7c3aed;border-color:#6d28d9;font-weight:600;font-size:12px;">
+                            💾 Simpan Daftar Halaman Iklan
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════
+             FILTER BAR: PERIODE WAKTU & SUMBER TRAFIK
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:16px 20px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             
@@ -1108,7 +1008,7 @@ function inq_tracker_dashboard_page() {
                     foreach ( $presets as $p_key => $p_name ):
                         $is_active = ( $period === $p_key );
                     ?>
-                        <a href="<?php echo esc_url( inq_filter_url( $p_key, $source, $custom_start, $custom_end ) ); ?>"
+                        <a href="<?php echo esc_url( inq_filter_url( $p_key, $traffic, $custom_start, $custom_end ) ); ?>"
                            style="display:inline-block;padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none;font-weight:<?php echo $is_active ? '700' : '500'; ?>;background:<?php echo $is_active ? '#0073aa' : '#f1f5f9'; ?>;color:<?php echo $is_active ? '#fff' : '#334155'; ?>;border:1px solid <?php echo $is_active ? '#0073aa' : '#e2e8f0'; ?>;transition:all 0.15s;">
                             <?php echo esc_html( $p_name ); ?>
                         </a>
@@ -1119,7 +1019,7 @@ function inq_tracker_dashboard_page() {
                 <form method="get" action="" style="display:flex;align-items:center;gap:8px;margin:0;flex-wrap:wrap;">
                     <input type="hidden" name="page" value="inquiry-analytics">
                     <input type="hidden" name="period" value="custom">
-                    <input type="hidden" name="source" value="<?php echo esc_attr( $source ); ?>">
+                    <input type="hidden" name="traffic" value="<?php echo esc_attr( $traffic ); ?>">
                     <label style="font-size:12px;font-weight:600;color:#64748b;">Custom:</label>
                     <input type="date" name="start_date" value="<?php echo esc_attr( $custom_start ); ?>" style="padding:4px 8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;">
                     <span style="color:#94a3b8;font-size:12px;">s/d</span>
@@ -1128,31 +1028,41 @@ function inq_tracker_dashboard_page() {
                 </form>
             </div>
 
-            <!-- Row 2: Filter Sumber Trafik (Origin URL Pills) -->
+            <!-- Row 2: Filter Sumber Trafik (Marketing: Iklan vs Organik) -->
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:12px;">
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                    <span style="font-size:13px;font-weight:700;color:#475569;margin-right:6px;">Sumber Trafik:</span>
+                    <span style="font-size:13px;font-weight:700;color:#475569;margin-right:6px;">Filter Trafik:</span>
                     
-                    <?php foreach ( $known_sources as $s_key => $s_title ):
-                        $is_s_active = ( $source === $s_key );
-                        $wa_num = ( $s_key === 'all' ) ? $total_wa_all : ( $source_wa_map[ $s_key ] ?? 0 );
-                        // Display pill if active, or 'all', or has recorded clicks/wa
-                        if ( $s_key !== 'all' && ! $is_s_active && empty( $source_clicks_map[ $s_key ] ) && empty( $source_wa_map[ $s_key ] ) ) {
-                            continue;
-                        }
-                    ?>
-                        <a href="<?php echo esc_url( inq_filter_url( $period, $s_key, $custom_start, $custom_end ) ); ?>"
-                           style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none;font-weight:<?php echo $is_s_active ? '700' : '500'; ?>;background:<?php echo $is_s_active ? '#0073aa' : '#f8fafc'; ?>;color:<?php echo $is_s_active ? '#fff' : '#334155'; ?>;border:1px solid <?php echo $is_s_active ? '#0073aa' : '#cbd5e1'; ?>;transition:all 0.15s;">
-                            <?php echo esc_html( $s_title ); ?>
-                            <span style="background:<?php echo $is_s_active ? 'rgba(255,255,255,0.25)' : '#e2e8f0'; ?>;color:<?php echo $is_s_active ? '#fff' : '#475569'; ?>;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;">
-                                <?php echo number_format( $wa_num ); ?> WA
-                            </span>
-                        </a>
-                    <?php endforeach; ?>
+                    <!-- Semua -->
+                    <a href="<?php echo esc_url( inq_filter_url( $period, 'all', $custom_start, $custom_end ) ); ?>"
+                       style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none;font-weight:<?php echo $traffic === 'all' ? '700' : '500'; ?>;background:<?php echo $traffic === 'all' ? '#1e293b' : '#f8fafc'; ?>;color:<?php echo $traffic === 'all' ? '#fff' : '#334155'; ?>;border:1px solid <?php echo $traffic === 'all' ? '#1e293b' : '#cbd5e1'; ?>;">
+                        Semua Trafik
+                        <span style="background:<?php echo $traffic === 'all' ? 'rgba(255,255,255,0.2)' : '#e2e8f0'; ?>;padding:1px 6px;border-radius:10px;font-size:11px;">
+                            <?php echo number_format( $total_wa_clicks_all ); ?> WA
+                        </span>
+                    </a>
+
+                    <!-- Hanya Iklan -->
+                    <a href="<?php echo esc_url( inq_filter_url( $period, 'ads', $custom_start, $custom_end ) ); ?>"
+                       style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none;font-weight:<?php echo $traffic === 'ads' ? '700' : '600'; ?>;background:<?php echo $traffic === 'ads' ? '#7c3aed' : '#faf5ff'; ?>;color:<?php echo $traffic === 'ads' ? '#fff' : '#7c3aed'; ?>;border:1px solid <?php echo $traffic === 'ads' ? '#7c3aed' : '#d8b4fe'; ?>;">
+                        🎯 Hanya Halaman Iklan (Paid)
+                        <span style="background:<?php echo $traffic === 'ads' ? 'rgba(255,255,255,0.2)' : '#f3e8ff'; ?>;padding:1px 6px;border-radius:10px;font-size:11px;">
+                            <?php echo number_format( $wa_ads_clicks ); ?> WA
+                        </span>
+                    </a>
+
+                    <!-- Hanya Organik -->
+                    <a href="<?php echo esc_url( inq_filter_url( $period, 'organic', $custom_start, $custom_end ) ); ?>"
+                       style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none;font-weight:<?php echo $traffic === 'organic' ? '700' : '600'; ?>;background:<?php echo $traffic === 'organic' ? '#059669' : '#f0fdf4'; ?>;color:<?php echo $traffic === 'organic' ? '#fff' : '#059669'; ?>;border:1px solid <?php echo $traffic === 'organic' ? '#059669' : '#a7f3d0'; ?>;">
+                        🌱 Hanya Organik
+                        <span style="background:<?php echo $traffic === 'organic' ? 'rgba(255,255,255,0.2)' : '#dcfce7'; ?>;padding:1px 6px;border-radius:10px;font-size:11px;">
+                            <?php echo number_format( $wa_org_clicks ); ?> WA
+                        </span>
+                    </a>
                 </div>
 
                 <div style="font-size:12px;color:#64748b;">
-                    Filter Aktif: <strong><?php echo esc_html( $label_source ); ?></strong>
+                    Menampilkan data: <strong><?php echo esc_html( $label_traffic ); ?></strong>
                 </div>
             </div>
 
@@ -1170,29 +1080,16 @@ function inq_tracker_dashboard_page() {
                         <span class="dashicons dashicons-whatsapp" style="font-size:18px;width:18px;height:18px;"></span>
                         Total Inquiry WhatsApp
                     </span>
-                    <?php if ( $source !== 'all' ): ?>
+                    <?php if ( $traffic !== 'all' ): ?>
                         <span style="background:rgba(255,255,255,0.25);font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
-                            <?php echo esc_html( strtoupper( str_replace('_', ' ', $source) ) ); ?>
+                            <?php echo $traffic === 'ads' ? 'IKLAN' : 'ORGANIK'; ?>
                         </span>
                     <?php endif; ?>
                 </div>
                 <div style="font-size:36px;font-weight:800;margin-top:6px;line-height:1;"><?php echo number_format( $display_wa_clicks ); ?></div>
-                
-                <!-- Dynamic Breakdown by Origin Source -->
-                <div style="font-size:11px;opacity:0.95;margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;border-top:1px solid rgba(255,255,255,0.25);padding-top:6px;">
-                    <?php
-                    $wa_source_badges = [];
-                    foreach ( $source_stats_raw as $s_item ) {
-                        if ( (int) $s_item['total_wa'] > 0 ) {
-                            $wa_source_badges[] = inq_tracker_origin_name( $s_item['origin_source'] ) . ': <b>' . number_format( (int)$s_item['total_wa'] ) . '</b>';
-                        }
-                    }
-                    if ( empty( $wa_source_badges ) ) {
-                        echo '<span>Belum ada inquiry WA tercatat</span>';
-                    } else {
-                        echo implode( ' <span style="opacity:0.6;">•</span> ', array_slice( $wa_source_badges, 0, 3 ) );
-                    }
-                    ?>
+                <div style="font-size:11px;opacity:0.9;margin-top:8px;display:flex;gap:10px;border-top:1px solid rgba(255,255,255,0.2);padding-top:6px;">
+                    <span>🎯 Iklan: <b><?php echo number_format( $wa_ads_clicks ); ?></b></span>
+                    <span>🌱 Organik: <b><?php echo number_format( $wa_org_clicks ); ?></b></span>
                 </div>
             </div>
 
@@ -1203,13 +1100,16 @@ function inq_tracker_dashboard_page() {
                         <span class="dashicons dashicons-admin-page" style="color:#0073aa;"></span>
                         Klik Button Halaman
                     </span>
-                    <span style="background:#f1f5f9;color:#64748b;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
-                        PAGE CTA
-                    </span>
+                    <?php if ( $traffic !== 'all' ): ?>
+                        <span style="background:#f1f5f9;color:#64748b;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
+                            <?php echo $traffic === 'ads' ? 'IKLAN' : 'ORGANIK'; ?>
+                        </span>
+                    <?php endif; ?>
                 </div>
                 <div style="font-size:34px;font-weight:700;color:#0073aa;margin-top:6px;line-height:1;"><?php echo number_format( $display_page_clicks ); ?></div>
-                <div style="font-size:11px;color:#64748b;margin-top:8px;border-top:1px solid #f1f5f9;padding-top:6px;">
-                    Klik elemen button atau link CTA di body halaman
+                <div style="font-size:11px;color:#64748b;margin-top:8px;display:flex;gap:10px;border-top:1px solid #f1f5f9;padding-top:6px;">
+                    <span>🎯 Iklan: <b><?php echo number_format( $page_ads_clicks ); ?></b></span>
+                    <span>🌱 Organik: <b><?php echo number_format( $page_org_clicks ); ?></b></span>
                 </div>
             </div>
 
@@ -1220,163 +1120,41 @@ function inq_tracker_dashboard_page() {
                         <span class="dashicons dashicons-format-chat" style="color:#25d366;"></span>
                         Klik Floating Button
                     </span>
-                    <span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
-                        FLOATING
-                    </span>
+                    <?php if ( $traffic !== 'all' ): ?>
+                        <span style="background:#f1f5f9;color:#64748b;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
+                            <?php echo $traffic === 'ads' ? 'IKLAN' : 'ORGANIK'; ?>
+                        </span>
+                    <?php endif; ?>
                 </div>
                 <div style="font-size:34px;font-weight:700;color:#25d366;margin-top:6px;line-height:1;"><?php echo number_format( $display_float_clicks ); ?></div>
-                <div style="font-size:11px;color:#64748b;margin-top:8px;border-top:1px solid #f1f5f9;padding-top:6px;">
-                    Klik widget floating WhatsApp / chat melayang
+                <div style="font-size:11px;color:#64748b;margin-top:8px;display:flex;gap:10px;border-top:1px solid #f1f5f9;padding-top:6px;">
+                    <span>🎯 Iklan: <b><?php echo number_format( $float_ads_clicks ); ?></b></span>
+                    <span>🌱 Organik: <b><?php echo number_format( $float_org_clicks ); ?></b></span>
                 </div>
             </div>
 
-            <!-- Total Pages & Sources Card -->
+            <!-- Total Pages Card -->
             <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:18px 22px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                 <div style="font-size:13px;color:#64748b;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                     <span style="display:flex;align-items:center;gap:6px;">
                         <span class="dashicons dashicons-visibility" style="color:#8b5cf6;"></span>
-                        Halaman Konversi Aktif
+                        Halaman Interaktif
                     </span>
                     <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;">
-                        INTERAKTIF
+                        <?php echo count( $ad_list ); ?> Iklan Terdaftar
                     </span>
                 </div>
                 <div style="font-size:34px;font-weight:700;color:#8b5cf6;margin-top:6px;line-height:1;"><?php echo number_format( $display_pages_count ); ?></div>
                 <div style="font-size:11px;color:#64748b;margin-top:8px;border-top:1px solid #f1f5f9;padding-top:6px;">
-                    <?php echo count($origin_report_data); ?> variasi jalur origin ke konversi
+                    Halaman aktif sesuai filter trafik
                 </div>
             </div>
 
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 1 (MAIN): DISTRIBUSI SUMBER TRAFIK & ORIGIN URL (FIRST-TOUCH ATTRIBUTION)
-        ════════════════════════════════════════════════ -->
-        <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
-                <div>
-                    <h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px;">
-                        <span class="dashicons dashicons-admin-site-alt3" style="color:#0284c7;font-size:24px;width:24px;height:24px;"></span>
-                        Distribusi Sumber Trafik & Origin URL (First-Touch Attribution)
-                        <span style="background:#0284c7;color:#fff;font-size:11px;padding:2px 10px;border-radius:12px;font-weight:600;">
-                            <?php echo count( $origin_report_data ); ?> Jalur Trafik
-                        </span>
-                    </h2>
-                    <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                        Melacak dari mana pengunjung pertama kali datang (Google Search, Google Ads, Meta Ads, Instagram, Direct, dll), landing page pertama, hingga halaman konversi tempat pengunjung klik CTA / WhatsApp.
-                    </div>
-                </div>
-
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <a href="<?php echo esc_url( $export_origin_url ); ?>" class="button button-secondary" style="font-size:12px;">
-                        ⬇ Export Data Sumber Trafik (CSV)
-                    </a>
-                </div>
-            </div>
-
-            <?php if ( empty( $origin_report_data ) ): ?>
-            <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
-                <span class="dashicons dashicons-info" style="font-size:32px;width:32px;height:32px;color:#94a3b8;display:block;margin:0 auto 8px;"></span>
-                Belum ada data sumber trafik yang tercatat pada filter aktif (<strong><?php echo esc_html( $label_period ); ?></strong> · <?php echo esc_html( $label_source ); ?>).
-            </div>
-            <?php else: ?>
-            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;">
-                <table class="widefat striped" style="border:none;margin:0;">
-                    <thead>
-                        <tr style="background:#0f172a;color:#fff;">
-                            <th style="color:#fff;width:35px;text-align:center;">#</th>
-                            <th style="color:#fff;width:170px;">Sumber Trafik</th>
-                            <th style="color:#fff;width:200px;">URL Referrer Asal</th>
-                            <th style="color:#fff;">Landing Page Pertama</th>
-                            <th style="color:#fff;">Halaman Konversi (CTA)</th>
-                            <th style="color:#fff;text-align:center;width:100px;">Total Klik</th>
-                            <th style="color:#fff;text-align:center;width:110px;">Inquiry WA</th>
-                            <th style="color:#fff;width:130px;">Terakhir Terjadi</th>
-                            <th style="color:#fff;width:80px;text-align:center;">Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ( $origin_report_data as $idx => $orow ):
-                            $ref_display = $orow['origin_referrer'] ?: '🌐 Direct (Ketik URL / Bookmark)';
-                            $land_url    = $orow['origin_landing'] ?: $orow['page_url'];
-                            $land_path   = parse_url( $land_url, PHP_URL_PATH ) ?: $land_url;
-                            $conv_path   = parse_url( $orow['page_url'], PHP_URL_PATH ) ?: $orow['page_url'];
-                            $ts          = strtotime( $orow['last_clicked'] );
-                            $ts_str      = $ts ? human_time_diff( $ts ) . ' lalu' : $orow['last_clicked'];
-                        ?>
-                        <tr>
-                            <td style="text-align:center;font-weight:700;color:#64748b;"><?php echo $idx + 1; ?></td>
-                            <td>
-                                <?php echo inq_tracker_origin_badge( $orow['origin_source'] ); ?>
-                            </td>
-                            <td>
-                                <?php if ( empty( $orow['origin_referrer'] ) ): ?>
-                                    <span style="font-size:11px;color:#64748b;">🌐 Direct / Langsung</span>
-                                <?php else: ?>
-                                    <a href="<?php echo esc_url( $orow['origin_referrer'] ); ?>" target="_blank" style="font-size:11px;color:#0284c7;text-decoration:none;word-break:break-all;" title="<?php echo esc_attr( $orow['origin_referrer'] ); ?>">
-                                        <?php echo esc_html( substr( $orow['origin_referrer'], 0, 40 ) . ( strlen( $orow['origin_referrer'] ) > 40 ? '…' : '' ) ); ?> ↗
-                                    </a>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <div style="font-size:12px;font-weight:600;color:#0f172a;word-break:break-all;">
-                                    <?php echo esc_html( $land_path ); ?>
-                                    <?php if ( $land_path === '/' ): ?>
-                                        <span style="background:#dcfce7;color:#15803d;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700;">HOME</span>
-                                    <?php endif; ?>
-                                </div>
-                                <?php if ( $land_url !== $land_path ): ?>
-                                <a href="<?php echo esc_url( $land_url ); ?>" target="_blank" style="font-size:10px;color:#94a3b8;text-decoration:none;">Buka Landing ↗</a>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <div style="font-size:12px;font-weight:600;color:#0f172a;word-break:break-all;">
-                                    <?php echo esc_html( $conv_path ); ?>
-                                </div>
-                                <span style="font-size:10px;color:#64748b;">
-                                    <?php echo ( (int)$orow['page_clicks'] > 0 ? (int)$orow['page_clicks'] . ' Button' : '' ) . ( (int)$orow['page_clicks'] > 0 && (int)$orow['float_clicks'] > 0 ? ' • ' : '' ) . ( (int)$orow['float_clicks'] > 0 ? (int)$orow['float_clicks'] . ' Floating' : '' ); ?>
-                                </span>
-                            </td>
-                            <td style="text-align:center;">
-                                <span style="background:#f1f5f9;color:#334155;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;">
-                                    <?php echo number_format( (int)$orow['total_clicks'] ); ?>
-                                </span>
-                            </td>
-                            <td style="text-align:center;">
-                                <?php if ( (int)$orow['total_wa'] > 0 ): ?>
-                                    <span style="background:#10b981;color:#fff;padding:3px 10px;border-radius:10px;font-weight:700;font-size:12px;box-shadow:0 1px 2px rgba(0,0,0,0.1);">
-                                        <?php echo number_format( (int)$orow['total_wa'] ); ?> WA
-                                    </span>
-                                <?php else: ?>
-                                    <span style="color:#cbd5e1;font-size:12px;">0</span>
-                                <?php endif; ?>
-                            </td>
-                            <td style="font-size:11px;color:#64748b;">
-                                <?php echo esc_html( $ts_str ); ?>
-                            </td>
-                            <td style="text-align:center;">
-                                <a href="<?php echo esc_url( $orow['page_url'] ); ?>" target="_blank" class="button button-small" style="font-size:11px;">
-                                    Lihat ↗
-                                </a>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                    <tfoot>
-                        <tr style="background:#f8fafc;font-weight:700;">
-                            <td colspan="5" style="text-align:right;padding:10px 16px;">Total Tampilan:</td>
-                            <td style="text-align:center;font-size:14px;color:#0f172a;padding:10px 0;"><?php echo number_format( array_sum( array_column( $origin_report_data, 'total_clicks' ) ) ); ?></td>
-                            <td style="text-align:center;font-size:14px;color:#059669;padding:10px 0;"><?php echo number_format( array_sum( array_column( $origin_report_data, 'total_wa' ) ) ); ?> WA</td>
-                            <td colspan="2"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-            <?php endif; ?>
-        </div>
-
-        <!-- ═══════════════════════════════════════════════
-             SECTION 2: REPORT KLIK BUTTON WA TIAP HALAMAN
+             SECTION 1 (SPECIAL): REPORT KLIK BUTTON WA TIAP HALAMAN
+             (Sesuai Arahan: "intinya nnti bisa jdi tabel report jumlah klik button wa tiap halaman berdasarkan periode waktu")
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -1389,7 +1167,7 @@ function inq_tracker_dashboard_page() {
                         </span>
                     </h2>
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                        Peringkat halaman konversi yang menghasilkan inquiry WhatsApp pada periode: <strong><?php echo esc_html( $label_period ); ?></strong> (<?php echo esc_html( $label_source ); ?>)
+                        Peringkat halaman yang menghasilkan inquiry WhatsApp pada periode: <strong><?php echo esc_html( $label_period ); ?></strong> (<?php echo esc_html( $label_traffic ); ?>)
                     </div>
                 </div>
 
@@ -1403,94 +1181,97 @@ function inq_tracker_dashboard_page() {
             <?php if ( empty( $wa_report_data ) ): ?>
             <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
                 <span class="dashicons dashicons-info" style="font-size:32px;width:32px;height:32px;color:#94a3b8;display:block;margin:0 auto 8px;"></span>
-                Belum ada klik button WhatsApp yang tercatat pada filter aktif.
+                Belum ada klik button WhatsApp yang tercatat pada filter aktif (<strong><?php echo esc_html( $label_period ); ?></strong> · <?php echo esc_html( $label_traffic ); ?>).
             </div>
             <?php else: ?>
-            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;">
-                <table class="widefat striped" style="border:none;margin:0;">
-                    <thead>
-                        <tr style="background:#065f46;color:#fff;">
-                            <th style="color:#fff;width:40px;text-align:center;">#</th>
-                            <th style="color:#fff;">Halaman Asal Inquiry</th>
-                            <th style="color:#fff;text-align:center;width:140px;">Button WA Page</th>
-                            <th style="color:#fff;text-align:center;width:140px;">Floating WA</th>
-                            <th style="color:#fff;text-align:center;width:140px;">Total Klik WA</th>
-                            <th style="color:#fff;width:180px;">Terakhir Diklik</th>
-                            <th style="color:#fff;width:100px;text-align:center;">Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php
-                        $max_wa = (int) ( $wa_report_data[0]['total_wa_clicks'] ?? 1 );
-                        foreach ( $wa_report_data as $idx => $wa_row ):
-                            $path = parse_url( $wa_row['page_url'], PHP_URL_PATH ) ?: $wa_row['page_url'];
-                            $pct  = $max_wa > 0 ? round( ( (int)$wa_row['total_wa_clicks'] / $max_wa ) * 100 ) : 0;
-                            $ts   = strtotime( $wa_row['last_clicked'] );
-                            $ts_str = $ts ? human_time_diff( $ts ) . ' lalu' : $wa_row['last_clicked'];
-                        ?>
-                        <tr>
-                            <td style="text-align:center;font-weight:700;color:#64748b;"><?php echo $idx + 1; ?></td>
-                            <td>
-                                <div style="font-weight:600;font-size:13px;color:#0f172a;display:flex;align-items:center;flex-wrap:wrap;gap:5px;">
-                                    <?php echo esc_html( $path ); ?>
-                                    <?php if ( $path === '/' ): ?>
-                                        <span style="background:#dcfce7;color:#15803d;font-size:10px;padding:2px 6px;border-radius:6px;font-weight:700;">HOMEPAGE</span>
-                                    <?php endif; ?>
-                                </div>
-                                <?php if ( $wa_row['page_title'] ): ?>
-                                <div style="font-size:11px;color:#64748b;margin-top:2px;"><?php echo esc_html( $wa_row['page_title'] ); ?></div>
+            <table class="widefat striped" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                <thead>
+                    <tr style="background:#065f46;color:#fff;">
+                        <th style="color:#fff;width:40px;text-align:center;">#</th>
+                        <th style="color:#fff;">Halaman Asal Inquiry</th>
+                        <th style="color:#fff;text-align:center;width:140px;">Button WA Page</th>
+                        <th style="color:#fff;text-align:center;width:140px;">Floating WA</th>
+                        <th style="color:#fff;text-align:center;width:140px;">Total Klik WA</th>
+                        <th style="color:#fff;width:180px;">Terakhir Diklik</th>
+                        <th style="color:#fff;width:100px;text-align:center;">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                    $max_wa = (int) ( $wa_report_data[0]['total_wa_clicks'] ?? 1 );
+                    foreach ( $wa_report_data as $idx => $wa_row ):
+                        $path = parse_url( $wa_row['page_url'], PHP_URL_PATH ) ?: $wa_row['page_url'];
+                        $pct  = $max_wa > 0 ? round( ( (int)$wa_row['total_wa_clicks'] / $max_wa ) * 100 ) : 0;
+                        $ts   = strtotime( $wa_row['last_clicked'] );
+                        $ts_str = $ts ? human_time_diff( $ts ) . ' lalu' : $wa_row['last_clicked'];
+                    ?>
+                    <tr>
+                        <td style="text-align:center;font-weight:700;color:#64748b;"><?php echo $idx + 1; ?></td>
+                        <td>
+                            <div style="font-weight:600;font-size:13px;color:#0f172a;display:flex;align-items:center;flex-wrap:wrap;gap:5px;">
+                                <?php echo esc_html( $path ); ?>
+                                <?php if ( $path === '/' ): ?>
+                                    <span style="background:#dcfce7;color:#15803d;font-size:10px;padding:2px 6px;border-radius:6px;font-weight:700;">HOMEPAGE</span>
                                 <?php endif; ?>
+                                <?php if ( ! empty( $wa_row['is_ad'] ) ): ?>
+                                    <span style="background:#f3e8ff;color:#7c3aed;border:1px solid #d8b4fe;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:700;">🎯 IKLAN</span>
+                                <?php else: ?>
+                                    <span style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600;">🌱 ORGANIK</span>
+                                <?php endif; ?>
+                            </div>
+                            <?php if ( $wa_row['page_title'] ): ?>
+                            <div style="font-size:11px;color:#64748b;margin-top:2px;"><?php echo esc_html( $wa_row['page_title'] ); ?></div>
+                            <?php endif; ?>
 
-                                <!-- Visual Proportion Bar -->
-                                <div style="background:#e2e8f0;border-radius:4px;height:4px;width:100%;max-width:240px;margin-top:6px;">
-                                    <div style="background:#10b981;height:4px;border-radius:4px;width:<?php echo $pct; ?>%;"></div>
-                                </div>
-                            </td>
+                            <!-- Visual Proportion Bar -->
+                            <div style="background:#e2e8f0;border-radius:4px;height:4px;width:100%;max-width:240px;margin-top:6px;">
+                                <div style="background:#10b981;height:4px;border-radius:4px;width:<?php echo $pct; ?>%;"></div>
+                            </div>
+                        </td>
 
-                            <td style="text-align:center;">
-                                <span style="background:#f1f5f9;color:#334155;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;">
-                                    <?php echo number_format( (int)$wa_row['page_wa_clicks'] ); ?>
-                                </span>
-                            </td>
+                        <td style="text-align:center;">
+                            <span style="background:#f1f5f9;color:#334155;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;">
+                                <?php echo number_format( (int)$wa_row['page_wa_clicks'] ); ?>
+                            </span>
+                        </td>
 
-                            <td style="text-align:center;">
-                                <span style="background:#f0fdf4;color:#16a34a;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid #bbf7d0;">
-                                    <?php echo number_format( (int)$wa_row['float_wa_clicks'] ); ?>
-                                </span>
-                            </td>
+                        <td style="text-align:center;">
+                            <span style="background:#f0fdf4;color:#16a34a;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid #bbf7d0;">
+                                <?php echo number_format( (int)$wa_row['float_wa_clicks'] ); ?>
+                            </span>
+                        </td>
 
-                            <td style="text-align:center;">
-                                <span style="background:#10b981;color:#fff;padding:4px 14px;border-radius:14px;font-weight:700;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,0.1);">
-                                    <?php echo number_format( (int)$wa_row['total_wa_clicks'] ); ?>
-                                </span>
-                            </td>
+                        <td style="text-align:center;">
+                            <span style="background:#10b981;color:#fff;padding:4px 14px;border-radius:14px;font-weight:700;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,0.1);">
+                                <?php echo number_format( (int)$wa_row['total_wa_clicks'] ); ?>
+                            </span>
+                        </td>
 
-                            <td style="font-size:12px;color:#64748b;">
-                                <?php echo esc_html( $ts_str ); ?>
-                            </td>
+                        <td style="font-size:12px;color:#64748b;">
+                            <?php echo esc_html( $ts_str ); ?>
+                        </td>
 
-                            <td style="text-align:center;">
-                                <a href="<?php echo esc_url( $wa_row['page_url'] ); ?>" target="_blank" class="button button-small" style="font-size:11px;">
-                                    Kunjungi ↗
-                                </a>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                    <tfoot>
-                        <tr style="background:#f8fafc;font-weight:700;">
-                            <td colspan="4" style="text-align:right;padding:10px 16px;">Total Klik WhatsApp (Tampilan Aktif):</td>
-                            <td style="text-align:center;font-size:16px;color:#059669;padding:10px 0;"><?php echo number_format( $display_wa_clicks ); ?></td>
-                            <td colspan="2"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
+                        <td style="text-align:center;">
+                            <a href="<?php echo esc_url( $wa_row['page_url'] ); ?>" target="_blank" class="button button-small" style="font-size:11px;">
+                                Kunjungi ↗
+                            </a>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr style="background:#f8fafc;font-weight:700;">
+                        <td colspan="4" style="text-align:right;padding:10px 16px;">Total Klik WhatsApp (Tampilan Aktif):</td>
+                        <td style="text-align:center;font-size:16px;color:#059669;padding:10px 0;"><?php echo number_format( $display_wa_clicks ); ?></td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
+            </table>
             <?php endif; ?>
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 3: PAGES (DENGAN ACCORDION SUB-DROPDOWN TIAP BUTTON)
+             SECTION 2: PAGES (DENGAN ACCORDION / SUB-DROPDOWN TIAP BUTTON)
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -1503,7 +1284,7 @@ function inq_tracker_dashboard_page() {
                         </span>
                     </h2>
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                        Klik baris halaman mana saja untuk membuka sub-dropdown dan melihat rincian button apa saja yang diklik.
+                        Klik baris halaman mana saja untuk membuka sub-dropdown dan melihat button apa saja yang diklik.
                     </div>
                 </div>
 
@@ -1522,7 +1303,7 @@ function inq_tracker_dashboard_page() {
 
             <?php if ( empty( $pages_data ) ): ?>
             <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
-                Belum ada klik button halaman pada filter aktif.
+                Belum ada klik button halaman pada filter aktif (<strong><?php echo esc_html( $label_period ); ?></strong> · <?php echo esc_html( $label_traffic ); ?>).
             </div>
             <?php else: ?>
 
@@ -1559,6 +1340,11 @@ function inq_tracker_dashboard_page() {
                                 <?php echo esc_html( $path ); ?>
                                 <?php if ( $path === '/' ): ?>
                                     <span style="background:#e0f2fe;color:#0369a1;font-size:10px;padding:2px 6px;border-radius:6px;font-weight:700;">HOMEPAGE</span>
+                                <?php endif; ?>
+                                <?php if ( ! empty( $page['is_ad'] ) ): ?>
+                                    <span style="background:#f3e8ff;color:#7c3aed;border:1px solid #d8b4fe;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:700;">🎯 IKLAN</span>
+                                <?php else: ?>
+                                    <span style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;font-size:10px;padding:1px 6px;border-radius:6px;font-weight:600;">🌱 ORGANIK</span>
                                 <?php endif; ?>
                                 <span style="font-size:11px;color:#64748b;font-weight:400;margin-left:4px;">
                                     (<?php echo count( $btn_rows ); ?> jenis button)
@@ -1650,7 +1436,7 @@ function inq_tracker_dashboard_page() {
         </div>
 
         <!-- ═══════════════════════════════════════════════
-             SECTION 4: FLOATING BUTTONS
+             SECTION 3: FLOATING BUTTONS
         ════════════════════════════════════════════════ -->
         <div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:20px 24px;margin-bottom:36px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -1663,7 +1449,7 @@ function inq_tracker_dashboard_page() {
                         </span>
                     </h2>
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                        Klik pada floating action button (WhatsApp melayang pojok layar, dll) pada periode: <strong><?php echo esc_html( $label_period ); ?></strong> (<?php echo esc_html( $label_source ); ?>)
+                        Klik pada floating action button (WhatsApp pojok layar, dll) pada periode: <strong><?php echo esc_html( $label_period ); ?></strong> (<?php echo esc_html( $label_traffic ); ?>)
                     </div>
                 </div>
 
@@ -1680,13 +1466,13 @@ function inq_tracker_dashboard_page() {
                 </div>
             </div>
 
-            <?php if ( empty( $float_raw ) ): ?>
+            <?php if ( empty( $float_data ) ): ?>
             <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:36px;text-align:center;color:#64748b;">
-                Belum ada data klik floating button pada filter aktif.
+                Belum ada data klik floating button pada filter aktif (<strong><?php echo esc_html( $label_period ); ?></strong> · <?php echo esc_html( $label_traffic ); ?>).
             </div>
             <?php else: ?>
-            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;">
-                <div style="display:grid;grid-template-columns:40px 1fr 1fr 140px 160px 100px;background:#10b981;color:#fff;font-weight:700;font-size:13px;padding:12px 16px;gap:10px;align-items:center;min-width:760px;">
+            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                <div style="display:grid;grid-template-columns:40px 1fr 1fr 140px 160px 100px;background:#10b981;color:#fff;font-weight:700;font-size:13px;padding:12px 16px;gap:10px;align-items:center;">
                     <div style="text-align:center;">#</div>
                     <div>Button</div>
                     <div>Halaman Tempat Diklik</div>
@@ -1695,12 +1481,12 @@ function inq_tracker_dashboard_page() {
                     <div style="text-align:center;">Total Klik</div>
                 </div>
 
-                <?php foreach ( $float_raw as $i => $row ):
+                <?php foreach ( $float_data as $i => $row ):
                     $clk  = (int) $row['click_count'];
                     $ts   = strtotime( $row['last_clicked'] );
                     $path = parse_url( $row['page_url'], PHP_URL_PATH ) ?: $row['page_url'];
                 ?>
-                <div style="display:grid;grid-template-columns:40px 1fr 1fr 140px 160px 100px;padding:12px 16px;gap:10px;align-items:center;border-top:1px solid #e2e8f0;background:<?php echo $i % 2 === 0 ? '#fff' : '#f0fdf4'; ?>;min-width:760px;">
+                <div style="display:grid;grid-template-columns:40px 1fr 1fr 140px 160px 100px;padding:12px 16px;gap:10px;align-items:center;border-top:1px solid #e2e8f0;background:<?php echo $i % 2 === 0 ? '#fff' : '#f0fdf4'; ?>;">
                     <div style="color:#94a3b8;font-size:12px;text-align:center;font-weight:600;"><?php echo $i + 1; ?></div>
                     <div>
                         <div style="font-weight:700;font-size:13px;color:#0f172a;"><?php echo esc_html( $row['btn_text'] ?: 'WhatsApp Floating Badge' ); ?></div>
@@ -1710,6 +1496,11 @@ function inq_tracker_dashboard_page() {
                         <a href="<?php echo esc_url( $row['page_url'] ); ?>" target="_blank" style="font-size:12px;color:#0073aa;font-weight:600;display:block;">
                             <?php echo esc_html( $path ); ?> ↗
                         </a>
+                        <?php if ( ! empty( $row['is_ad'] ) ): ?>
+                            <span style="background:#f3e8ff;color:#7c3aed;border:1px solid #d8b4fe;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;display:inline-block;margin-top:3px;">🎯 IKLAN</span>
+                        <?php else: ?>
+                            <span style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;display:inline-block;margin-top:3px;">🌱 ORGANIK</span>
+                        <?php endif; ?>
                     </div>
                     <div style="font-size:11px;color:#475569;word-break:break-all;">
                         <?php echo $row['btn_href'] ? esc_html( substr( $row['btn_href'], 0, 40 ) ) : '<span style="color:#cbd5e1;">—</span>'; ?>
@@ -1741,7 +1532,7 @@ function inq_tracker_dashboard_page() {
         </div>
 
         <p style="color:#94a3b8;font-size:11px;margin-top:16px;">
-            Inquiry Tracker v<?php echo INQ_TRACKER_VERSION; ?> · First-party tracking · Bot-filtered · First-Touch Origin URL Attribution
+            Inquiry Tracker v<?php echo INQ_TRACKER_VERSION; ?> · First-party tracking · Bot-filtered · Ads vs Organic Ready
         </p>
 
     </div>
@@ -1758,6 +1549,13 @@ function inq_tracker_dashboard_page() {
             arrow.textContent = isOpen ? '▾' : '▴';
             arrow.style.color = isOpen ? '#0073aa' : '#10b981';
         }
+    }
+
+    function inqToggleSettings() {
+        var el = document.getElementById('inq-settings-body');
+        if (!el) return;
+        var isOpen = el.style.display !== 'none';
+        el.style.display = isOpen ? 'none' : 'block';
     }
     </script>
     <?php

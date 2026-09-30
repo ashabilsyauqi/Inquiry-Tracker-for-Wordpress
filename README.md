@@ -3,12 +3,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/WordPress-5.0_to_6.7+-21759B?style=for-the-badge&logo=wordpress&logoColor=white" alt="WordPress Compatibility" />
   <img src="https://img.shields.io/badge/PHP-7.4_to_8.3+-777BB4?style=for-the-badge&logo=php&logoColor=white" alt="PHP Version" />
-  <img src="https://img.shields.io/badge/Version-1.2.0-10B981?style=for-the-badge" alt="Plugin Version" />
+  <img src="https://img.shields.io/badge/Version-1.3.0-10B981?style=for-the-badge" alt="Plugin Version" />
   <img src="https://img.shields.io/badge/License-GPL_v2-blue?style=for-the-badge" alt="License" />
 </p>
 
 <p align="center">
-  <strong>Plugin WordPress mandiri (First-Party) untuk melacak klik tombol, inquiry WhatsApp, dan floating button secara real-time dengan atribusi otomatis Landing Page Iklan (Paid Ads) vs Organik.</strong>
+  <strong>Plugin WordPress mandiri (First-Party) untuk melacak klik tombol, inquiry WhatsApp, dan floating button secara real-time dengan Atribusi Objektif Sumber Trafik Asal (Origin URL: Google Search Organik SEO, Google Ads, Meta Ads, Instagram, TikTok, Direct, & Referral).</strong>
 </p>
 
 ---
@@ -36,11 +36,19 @@ Banyak bisnis dan tim marketing kesulitan mengukur efektivitas tombol WhatsApp d
 
 ## 🚀 Fitur Unggulan
 
-### 1. 🎯 Atribusi Halaman Iklan (Paid Ads vs Organik)
-- **Field Konfigurasi Cepat**: Masukkan URL atau slug landing page iklan (1 baris per link) langsung dari dashboard.
-- **Pencocokan Cerdas (Path-Based Matching)**: Pengunjung yang datang dari Facebook Ads, Google Ads, atau TikTok Ads dengan parameter query (misal `?utm_source=...`, `?fbclid=...`, `?gclid=...`) tetap otomatis teridentifikasi sebagai halaman iklan.
-- **Filter Sumber Trafik**: Beralih instan antara **Semua Trafik**, **🎯 Hanya Iklan (Paid)**, atau **🌱 Hanya Organik**.
-- **Labeling Visual (Badges)**: Label `🎯 IKLAN` dan `🌱 ORGANIK` disematkan pada laporan halaman, accordion tombol, dan riwayat floating WhatsApp.
+### 1. 🌐 Atribusi Objektif Sumber Trafik (Origin URL & First-Touch Tracking)
+- **Penengah Objektif SEO vs Paid Ads**: Tidak lagi mengandalkan asumsi manual atau klaim sepihak. Plugin mencatat secara faktual dari mana pengunjung pertama kali datang ke website.
+- **Deteksi Otomatis Multi-Platform**:
+  - `🔍 Google Search (Organik)`: Pengunjung yang datang dari hasil pencarian Google murni tanpa parameter iklan.
+  - `🎯 Google Ads`: Pengunjung yang membawa parameter `gclid`, `gbraid`, `wbraid`, atau UTM paid Google.
+  - `📢 Meta / FB Ads`: Pengunjung yang membawa parameter `fbclid` atau UTM paid Meta/Facebook/Instagram.
+  - `📱 Instagram` & `📘 Facebook`: Rujukan dari aplikasi atau website media sosial (`l.instagram.com`, `l.facebook.com`).
+  - `🎯 TikTok Ads` & `🎵 TikTok`: Pengunjung dari iklan TikTok (`ttclid`) atau rujukan TikTok.
+  - `🌐 Direct / Langsung`: Pengunjung yang mengetik langsung alamat web atau membuka bookmark.
+  - `🔗 Referral Eksternal`: Rujukan dari website partner atau blog eksternal.
+  - `🏷️ Custom Campaign`: Pengunjung dari kampanye UTM kustom lainnya.
+- **Solusi Anti "Lost Referrer"**: Menggunakan *First-Touch Session Tracking* (`sessionStorage`). Jika pengunjung masuk via Meta Ads ke Landing Page A, lalu berpindah membaca halaman B dan baru mengklik WhatsApp di halaman C, sumber trafik tetap tercatat akurat sebagai Meta Ads dengan landing page pertama A dan halaman konversi C!
+- **Tabel Distribusi Sumber Trafik**: Menampilkan ringkasan platform asal, URL referrer lengkap, landing page pertama, halaman konversi, hingga jumlah inquiry WhatsApp yang dihasilkan.
 
 ### 2. 💬 Deteksi Otomatis Floating WhatsApp
 - Mendeteksi elemen dengan properti CSS `position: fixed` / `position: sticky` (dengan filter otomatis agar navbar tidak salah terdeteksi).
@@ -87,17 +95,26 @@ Banyak bisnis dan tim marketing kesulitan mengukur efektivitas tombol WhatsApp d
 
 ```text
 ├── assets/
-│   └── dashboard-preview.png     # Screenshot preview dashboard
+│   └── dashboard-preview.png               # Screenshot preview dashboard
 ├── wp-inquiry-tracker/
-│   ├── readme.txt                # Metadata resmi plugin standar WordPress
-│   └── wp-inquiry-tracker.php    # Single-file core engine (v1.2.0)
-├── wp-inquiry-tracker.zip        # Paket instalasi siap pasang
-└── README.md                     # Dokumentasi repositori
+│   ├── readme.txt                          # Metadata resmi plugin standar WordPress
+│   ├── wp-inquiry-tracker.php              # Single-file core engine v1.3.0 (Origin URL Tracking)
+│   └── wp-inquiry-tracker-v1.2.0-backup.php # File cadangan aman v1.2.0
+├── wp-inquiry-tracker.zip                  # Paket instalasi siap pasang
+└── README.md                               # Dokumentasi repositori
 ```
 
 ---
 
 ## 📋 Changelog
+
+### Version 1.3.0
+- **First-Touch Session Origin URL Tracking**: Pelacakan sumber trafik asal pengunjung menggunakan `sessionStorage`.
+- **Deteksi Faktual Multi-Platform**: Mendeteksi otomatis Google Search (Organik SEO), Google Ads (`gclid`), Meta Ads (`fbclid`), Instagram (`l.instagram.com`), TikTok, Direct, dan Referral.
+- **Tabel Distribusi Sumber Trafik & Origin URL**: Tabel khusus di dashboard yang merinci platform asal, URL referrer asli, landing page awal, dan halaman konversi CTA/WA.
+- **Filter Pills Dinamis**: Filter instan berdasarkan platform asal trafik lengkap dengan counter jumlah WhatsApp inquiry real-time.
+- **Solusi Lost Referrer**: Atribusi tetap melekat meskipun pengunjung berpindah-pindah halaman sebelum mengklik CTA WhatsApp.
+- **Cadangan Aman v1.2.0**: File versi sebelumnya tersimpan aman di `wp-inquiry-tracker-v1.2.0-backup.php`.
 
 ### Version 1.2.0
 - **Marketing Ad Pages Attribution**: Penambahan form pengaturan landing page iklan di dashboard.
